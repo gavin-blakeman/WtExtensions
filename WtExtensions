@@ -1,0 +1,8 @@
+﻿#ifndef WTEXTENSIONS_H
+#define WTEXTENSIONS_H
+
+#include "include/extendedComboBox.h"
+#include "include/extensions.h"
+#include "include/loggerSink.h"
+
+#endif // WTEXTENSIONS_H
