@@ -6,6 +6,7 @@ PROJECT(WtExtensions DESCRIPTION "Wt Extensions")
 
 SET(CMAKE_CXX_STANDARD 20)
 SET(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_FLAGS "-fPIC")
 
 SET(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
 
@@ -15,6 +16,8 @@ set(SOURCES
   source/extensions.cpp
   source/loggerSink.cpp
   source/moneyValidator.cpp
+  source/progressText.cpp
+  source/stream2Control.cpp
   )
 set(HEADERS
   WtExtensions
@@ -26,6 +29,8 @@ set(HEADERS
   include/extensions.h
   include/loggerSink.h
   include/moneyValidator.h
+  include/progressText.h
+  include/stream2Control.h
   )
 
 set(INCLUDES
