@@ -17,7 +17,6 @@ set(SOURCES
   source/loggerSink.cpp
   source/moneyValidator.cpp
   source/progressText.cpp
-  source/stream2Control.cpp
   )
 set(HEADERS
   WtExtensions
