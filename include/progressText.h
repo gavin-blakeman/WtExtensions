@@ -1,17 +1,28 @@
 ﻿#ifndef PROGRESSTEXT_H
 #define PROGRESSTEXT_H
 
+  // Standard C++ library
+
+#include <streambuf>
+#include <ostream>
+
   // Wt++ header files
 
+#include <Wt/WApplication.h>
 #include <Wt/WText.h>
 
 class CProgressText : private std::streambuf, public std::ostream, public Wt::WText
 {
 public:
-  CProgressText() : std::ostream(this), Wt::WText() {}
+  using Traits = std::streambuf::traits_type;
+
+  CProgressText();
 
 private:
-  int overflow(int c) override;
+  Wt::WApplication *app = nullptr;
+
+  virtual std::streambuf::int_type overflow(int c) override;
+
 
 };
 

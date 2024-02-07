@@ -1,5 +1,5 @@
-﻿#ifndef LOGGERSINK_H
-#define LOGGERSINK_H
+﻿#ifndef WT_EXTENSIONS_LOGGERSINK_H
+#define WT_EXTENSIONS_LOGGERSINK_H
 
   // Standard C++ library
 
@@ -15,4 +15,4 @@ public:
 Wt::WLogSink &customWtLogger();
 
 
-#endif // LOGGERSINK_H
+#endif // WT_EXTENSIONS_LOGGERSINK_H

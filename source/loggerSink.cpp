@@ -20,35 +20,24 @@ Wt::WLogSink &customWtLogger()
 
 void CWTLogger::log(std::string const &type, std::string const &scope, std::string const &message) const noexcept
 {
-//  enum ESeverity
-//  {
-//    trace,      ///< Lowest level log severity. Used for tracing program execution through function entry/exit.
-//    exception,  ///< Used to capture exceptions. These do not need to be actioned as the code may manage them.
-//    debug,      ///< Used to display debugging messages.
-//    info,       ///< Information messages.
-//    notice,     ///< Legal notices etc.
-//    warning,    ///< Failure of action. Normally built into program logic. (Time outs etc)
-//    error,      ///< Failure of program function. May be recoverable.
-//    critical,   ///< Non-recoverable failure.
-//  };
 
-  GCL::logger::ESeverity severity = GCL::logger::debug;
+  GCL::logger::severity_e severity;
 
   if (type == "debug")
   {
-    severity = GCL::logger::debug;
+    severity = GCL::logger::s_debug;
   }
   else if (type == "info")
   {
-    severity = GCL::logger::info;
+    severity = GCL::logger::s_information;
   }
   else if (type == "warning")
   {
-    severity = GCL::logger::warning;
+    severity = GCL::logger::s_warning;
   }
   else if (type == "error")
   {
-    severity = GCL::logger::error;
+    severity = GCL::logger::s_error;
   }
   else
   {
