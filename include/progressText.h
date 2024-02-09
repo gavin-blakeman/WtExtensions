@@ -22,6 +22,7 @@ private:
   Wt::WApplication *app = nullptr;
 
   virtual std::streambuf::int_type overflow(int c) override;
+  virtual void updateDom(Wt::DomElement& element, bool all) override;
 
 
 };

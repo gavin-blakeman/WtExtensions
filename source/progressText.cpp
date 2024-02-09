@@ -6,11 +6,13 @@
 
   // Wt header files
 
+#include <Wt/DomElement.h>
 #include <Wt/WString.h>
 
 CProgressText::CProgressText() : std::ostream(this), Wt::WText(), app(Wt::WApplication::instance())
   {
     setTextFormat(Wt::TextFormat::Plain);
+    setStyleClass("textarea");
     app->enableUpdates(true);
   }
 
@@ -27,4 +29,10 @@ std::streambuf::int_type CProgressText::overflow(int ch)
       return 0;
     };
   };
+}
+
+void CProgressText::updateDom(Wt::DomElement& element, bool all)
+{
+  Wt::WText::updateDom(element, all);
+  element.setProperty(Wt::Property::StyleOverflowY, "auto");
 }
