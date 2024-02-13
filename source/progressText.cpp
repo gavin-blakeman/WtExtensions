@@ -25,6 +25,7 @@ std::streambuf::int_type CProgressText::overflow(int ch)
     if (ch != Traits::eof())
     {
       setText(text() + std::string{static_cast<char>(ch)});
+      doJavaScript(jsRef() + ".scrollTop = "+ jsRef() + ".scrollHeight;");
       app->triggerUpdate();
       return 0;
     };
