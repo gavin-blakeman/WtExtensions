@@ -14,6 +14,7 @@ find_package(Wt REQUIRED)
 
 set(SOURCES
   source/extensions.cpp
+  source/extendedProgressBar.cpp
   source/loggerSink.cpp
   source/moneyValidator.cpp
   source/progressText.cpp
@@ -23,6 +24,7 @@ set(HEADERS
   include/extendedComboBox.h
   include/extendedDoubleSpinBox.h
   include/extendedLineEdit.h
+  include/extendedProgressBar.h
   include/extendedPushButton.h
   include/extendedTimeEdit.h
   include/extensions.h
@@ -35,6 +37,7 @@ set(HEADERS
 set(INCLUDES
   ${CMAKE_SOURCE_DIR}/GCL
   ${CMAKE_SOURCE_DIR}/SCL
+  ${CMAKE_SOURCE_DIR}/fmt/include
   )
 
 add_library(${PROJECT_NAME} STATIC ${SOURCES} ${HEADERS})

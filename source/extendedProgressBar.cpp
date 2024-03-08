@@ -1,7 +1,7 @@
 //*********************************************************************************************************************************
 //
 // PROJECT:             Wt Extensions
-// FILE:                extendedProgressBar.h
+// FILE:                extendedProgressBar.cpp
 // LANGUAGE:            C++
 // TARGET OS:           None.
 // NAMESPACE:           GCL
@@ -28,32 +28,32 @@
 //
 //*********************************************************************************************************************************
 
-#ifndef WTEXTENSIONS_INCLUDE_EXTENDEDPROGRESSBAR_H_
-#define WTEXTENSIONS_INCLUDE_EXTENDEDPROGRESSBAR_H_
+#include "include/extendedProgressBar.h"
 
-// Wt++ library
-
-#include <Wt/WApplication.h>
-#include <Wt/WProgressBar.h>
-
-class extendedProgressBar : public Wt::WProgressBar
+extendedProgressBar::extendedProgressBar(Wt::WApplication &a) : Wt::WProgressBar(), app(&a)
 {
-public:
-  extendedProgressBar(Wt::WApplication &);
-  ~extendedProgressBar() = default;
-
-  void setValue(double);
-  void setRange(double, double);
-
-private:
-  extendedProgressBar() = delete;
-  extendedProgressBar(extendedProgressBar const &) = delete;
-  extendedProgressBar(extendedProgressBar &&) = delete;
-  extendedProgressBar &operator=(extendedProgressBar const &) = delete;
-  extendedProgressBar &operator=(extendedProgressBar &&) = delete;
-
-  Wt::WApplication *app = nullptr;
-};
+  app->enableUpdates(true);
+}
 
 
-#endif /* WTEXTENSIONS_INCLUDE_EXTENDEDPROGRESSBAR_H_ */
+void extendedProgressBar::setValue(double value)
+{
+  Wt::WApplication::UpdateLock uiLock(app);
+
+  if (uiLock)
+  {
+    WProgressBar::setValue(value);
+    app->triggerUpdate();
+  };
+}
+
+void extendedProgressBar::setRange(double minimum, double maximum)
+{
+  Wt::WApplication::UpdateLock uiLock(app);
+
+  if (uiLock)
+  {
+    WProgressBar::setRange(minimum, maximum);
+    app->triggerUpdate();
+  };
+}
