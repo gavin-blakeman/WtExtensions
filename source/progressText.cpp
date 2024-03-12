@@ -6,7 +6,7 @@
 
   // Wt header files
 
-#include <Wt/DomElement.h>
+#include <web/DomElement.h>
 #include <Wt/WString.h>
 
 CProgressText::CProgressText() : std::ostream(this), Wt::WText(), app(Wt::WApplication::instance())

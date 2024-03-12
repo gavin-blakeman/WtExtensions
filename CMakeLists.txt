@@ -10,8 +10,6 @@ set(CMAKE_CXX_FLAGS "-fPIC")
 
 SET(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
 
-find_package(Wt REQUIRED)
-
 set(SOURCES
   source/extensions.cpp
   source/extendedProgressBar.cpp
@@ -38,6 +36,8 @@ set(INCLUDES
   ${CMAKE_SOURCE_DIR}/GCL
   ${CMAKE_SOURCE_DIR}/SCL
   ${CMAKE_SOURCE_DIR}/fmt/include
+  ${CMAKE_SOURCE_DIR}/wt/src
+  ${CMAKE_SOURCE_DIR}/build/wt
   )
 
 add_library(${PROJECT_NAME} STATIC ${SOURCES} ${HEADERS})
