@@ -15,7 +15,9 @@ set(SOURCES
   source/extendedProgressBar.cpp
   source/loggerSink.cpp
   source/moneyValidator.cpp
+  source/progressGroup.cpp
   source/progressText.cpp
+  source/requirementsWidget.cpp
   )
 set(HEADERS
   WtExtensions
@@ -26,9 +28,12 @@ set(HEADERS
   include/extendedPushButton.h
   include/extendedTimeEdit.h
   include/extensions.h
+  include/fileListWidget.h
   include/loggerSink.h
   include/moneyValidator.h
+  include/progressGroup.h
   include/progressText.h
+  include/requirementsWidget.h
   include/stream2Control.h
   )
 
