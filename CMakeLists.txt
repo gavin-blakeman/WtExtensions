@@ -41,6 +41,7 @@ set(INCLUDES
   ${CMAKE_SOURCE_DIR}/GCL
   ${CMAKE_SOURCE_DIR}/SCL
   ${CMAKE_SOURCE_DIR}/fmt/include
+  ${CMAKE_SOURCE_DIR}/xlnt/include
   ${CMAKE_SOURCE_DIR}/wt/src
   ${CMAKE_SOURCE_DIR}/build/wt
   )
