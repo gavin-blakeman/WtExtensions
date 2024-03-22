@@ -13,6 +13,7 @@ SET(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/${PROJECT_NAME})
 set(SOURCES
   source/extensions.cpp
   source/extendedProgressBar.cpp
+  source/fileListWidget.cpp
   source/loggerSink.cpp
   source/moneyValidator.cpp
   source/progressGroup.cpp

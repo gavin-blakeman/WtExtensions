@@ -46,10 +46,9 @@
 
 // Wt library
 #include <Wt/WAbstractItemModel.h>
-#include <Wt/WContainerWidget.h>
-#include <Wt/WIconPair.h>
+#include <Wt/WTableView.h>
 
-class CRequirementsWidget : public Wt::WContainerWidget
+class CRequirementsWidget : public Wt::WTableView
 {
 public:
   using ID_t = std::uint64_t;       // Identifier type to identify the specific requirement.
@@ -57,11 +56,6 @@ public:
   {
     REQUIRED,
     OPTIONAL,
-  };
-  enum requirementMet_e
-  {
-    AVAILABLE,
-    PENDING,
   };
 
   CRequirementsWidget();
@@ -73,8 +67,10 @@ public:
 
   void changeStatus(ID_t, bool = true);
 
+  [[nodiscard]] bool allMet() const noexcept;
+
 protected:
-  void setupUI();
+  void createUI();
 
 
 private:
@@ -84,7 +80,6 @@ private:
   CRequirementsWidget &operator==(CRequirementsWidget &&) = delete;
 
   std::shared_ptr<Wt::WAbstractItemModel> model;
-
 };
 
 
