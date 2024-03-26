@@ -41,12 +41,12 @@ Wt::WLogSink &customWtLogger()
   return cl;
 }
 
-/// @brief Logs the specified message.
-/// @param[in] type:
-/// @param[in] scope:
-/// @param[in] message:
-/// @throws NOEXCEPT
-/// @version 2022-10-13/GGB - Function created.
+/// @brief      Logs the specified message.
+/// @param[in]  type:
+/// @param[in]  scope:
+/// @param[in]  message:
+/// @throws     NOEXCEPT
+/// @version    2022-10-13/GGB - Function created.
 
 void CWTLogger::log(std::string const &type, std::string const &scope, std::string const &message) const noexcept
 {
@@ -74,8 +74,7 @@ void CWTLogger::log(std::string const &type, std::string const &scope, std::stri
     std::cout << type << std::endl;
   }
 
-  if (scope != "WEnvironment" &&
-      scope != "WApplication")
+  if (scope != "WEnvironment" && scope != "WApplication")
   {
     LOGMESSAGE(severity, message);
   };
