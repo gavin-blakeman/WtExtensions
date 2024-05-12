@@ -48,6 +48,26 @@
 #include <boost/locale.hpp>
 #include <GCL>
 
+/* Multi-threading
+ * The classes need to support multi-threading. The class maintains it's own thread to handle the GUI updates.
+ * The class may also be called by multi-threaded applications. As a result some of the functions need protection while others
+ * don't.
+ * The class does need to support multi-threading, no static members, re-entrant functions.
+ *
+ * These classes need protection for both the data and the individual actions.
+ * In theory the data can be accessed by the following (1 Writer, Many readers.)
+ * > addAction - Update value_list, byID and parentChild trees.
+ * > updateThread - Read value_list and byID
+ * > callbackFunction - read value_list and byID
+ * > Reload model
+ * The action data can be accessed by the following:
+ * > updateThread - Read and write data. Writing data could all be assinged to atomics.
+ * > callbackFunction - write data. Could be done using atomics.
+ * > delegate - read/write data - Could be done with atomics.
+ * > model - read data - atomics ok.
+ * The action data does not require a mutex if all the mutable data can be stored in atomics, including the pointer. Noting that
+ * atomics may be implemeted using locks.
+ */
 
 
 /* The CProgressGroupModel handles providing the parent/child hierarchy to the treeView. The model takes the list provided and
@@ -65,37 +85,42 @@ public:
   using value_list = CProgressGroup::value_list;
   using pointer = value_type *;
   using const_pointer = value_type const *;
+  using mutex_type = CProgressGroup::mutex_type;
+  using unique_lock = CProgressGroup::unique_lock;
+  using shared_lock = CProgressGroup::shared_lock;
+  using data_type = CProgressGroup::data_t;
 
-  CProgressGroupModel(value_list &valueList) : records(valueList)
+  /*! @brief      Constructor.
+   *  @param[in]  d: The data for the model to manage.
+   *  @throws
+   */
+  CProgressGroupModel(data_type &d) : data_(d)
   {
-    for (auto &val: records)
-    {
-      byID.emplace(val.get<0>(), std::ref(val));
-    }
-
-    SCL::parentChild<ID_t, value_type, 0, 1, value_list, false> parentChild(records);
-    std::list<ID_t> idList = parentChild.preOrder_ID<std::list<ID_t>>(0);
-    for (auto const &id: idList)
-    {
-      modelData[id] = std::make_tuple(parentChild.parent(id), 0, std::move(parentChild.children(id)));
-    }
-
-    // Set the row numbers. Just work through all the items and assign row numbers as required.
-    // Note: it may be quicker to use a stack to track row numbers, but this is just as easy and speed is probably not a
-    // requirement at this time.
-
-    for (auto &item: modelData)
-    {
-      if (std::get<2>(item.second).size() != 0)
-      {
-        std::size_t row = 0;
-        for (auto const &child: std::get<2>(item.second))
-        {
-          std::get<1>(modelData[child]) = row++;
-        }
-      }
-    }
+//    std::list<ID_t> idList = parentChild.preOrder_ID<std::list<ID_t>>(0);
+//    for (auto const &id: idList)
+//    {
+//      modelData[id] = std::make_tuple(parentChild.parent(id), 0, std::move(parentChild.children(id)));
+//    }
+//
+//    // Set the row numbers. Just work through all the items and assign row numbers as required.
+//    // Note: it may be quicker to use a stack to track row numbers, but this is just as easy and speed is probably not a
+//    // requirement at this time.
+//
+//    for (auto &item: modelData)
+//    {
+//      if (std::get<2>(item.second).size() != 0)
+//      {
+//        std::size_t row = 0;
+//        for (auto const &child: std::get<2>(item.second))
+//        {
+//          std::get<1>(modelData[child]) = row++;
+//        }
+//      }
+//    }
   }
+
+  /*! @brief    Class destructor.
+   */
   virtual ~CProgressGroupModel() = default;
 
 protected:
@@ -160,10 +185,10 @@ protected:
       }
       else
       {
-        ID = std::get<2>(modelData.at(indx.internalId())).at(indx.row());
+        //ID = std::get<2>(data_.at(indx.internalId())).at(indx.row());
       }
     }
-    return std::get<2>(modelData.at(ID)).size();
+    //return std::get<2>(data_.at(ID)).size();
   }
 
   /// @brief      Creates an index for the specified item.
@@ -179,7 +204,7 @@ protected:
 
     if (parent.isValid())
     {
-      PID = std::get<2>(modelData.at(parent.internalId())).at(parent.row());
+      //PID = std::get<2>(modelData.at(parent.internalId())).at(parent.row());
     }
 
     return createIndex(row, col, PID);
@@ -199,8 +224,8 @@ protected:
     }
     else
     {
-      child_type const &item = modelData.at(indx.internalId());
-      return createIndex(std::get<1>(item), 0, std::get<0>(item));
+//      child_type const &item = data_.byID.at(indx.internalId());
+//      return createIndex(std::get<1>(item), 0, std::get<0>(item));
     }
   }
 
@@ -220,7 +245,7 @@ protected:
   {
     std::any rv;
 
-    ID_t valueID = std::get<2>(modelData.at(index.internalId()))[index.row()];
+    //ID_t valueID = std::get<2>(modelData.at(index.internalId()))[index.row()];
 
     switch (index.column())
     {
@@ -230,7 +255,7 @@ protected:
         {
           case Wt::ItemDataRole::Display:
           {
-            rv = byID.at(valueID).get().itemText;
+            //rv = data_.byID.at(valueID).get().itemText;
           }
           default:
           {
@@ -292,221 +317,218 @@ private:
   CProgressGroupModel &operator=(CProgressGroupModel const &) = delete;
   CProgressGroupModel &operator=(CProgressGroupModel &&) = delete;
 
-  using child_type = std::tuple<ID_t, int, std::vector<ID_t>>; // parentID, row, children
-  value_list &records;
-  std::map<ID_t, value_ref> byID;
-  std::map<ID_t, child_type> modelData;    // MyID, <parentID, row>
+  using child_type = std::tuple<ID_t, int, std::vector<ID_t>>;  // parentID, row, children
+  data_type &data_;                                          // Refers to the list maintained by the progress group.
 };
 
 
-/// Implements the delegate to display the progress bar or the text.
+/*! @class  Implements the delegate to display the progress bar or the text.
+ */
 class CProgressItemDelegate : public Wt::WAbstractItemDelegate
 {
 public:
-  CProgressItemDelegate(std::string const &pt, std::string const &ct) : pendingText(pt), completeText(ct) {}
+  using mutex_type = CProgressGroup::mutex_type;
+  using unique_lock = CProgressGroup::unique_lock;
+  using shared_lock = CProgressGroup::shared_lock;
+
+  CProgressItemDelegate() = default;
   virtual ~CProgressItemDelegate() = default;
 
 protected:
   virtual std::unique_ptr<Wt::WWidget> update(Wt::WWidget *widget, Wt::WModelIndex const &index, Wt::WFlags<Wt::ViewItemRenderFlag>)
   {
     std::unique_ptr<Wt::WWidget> rv;
-    CProgressGroup::pointer data = std::any_cast<CProgressGroup::pointer>(index.data(Wt::ItemDataRole::User));
 
-    CProgressGroupModel const *model = dynamic_cast<CProgressGroupModel const *>(index.model());
+//    const_pointer d = std::any_cast<const_pointer>(index.data(Wt::ItemDataRole::User));
+//    pointer data = const_cast<pointer>(d);    // Need a non-const pointer to change values.
 
-    switch(data->status)
-    {
-      case CProgressGroup::S_PENDING:
-      {
-        if (data->textEditStatus == nullptr)
-        {
-          rv = std::make_unique<Wt::WText>(pendingText);
-          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
-        }
-        break;
-      }
-      case CProgressGroup::S_ACTIVE:
-      {
-        if (data->textEditStatus != nullptr)
-        {
-          data->textEditStatus = nullptr;
-          rv = std::make_unique<Wt::WProgressBar>();
-          data->progressBar = dynamic_cast<Wt::WProgressBar *>(rv.get());
-        }
-        break;
-      }
-      case CProgressGroup::S_COMPLETE:
-      {
-        if (data->progressBar != nullptr)
-        {
-          data->progressBar = nullptr;
-          rv = std::make_unique<Wt::WText>(completeText);
-          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
-        }
-        break;
-      }
-      default:
-      {
-        CODE_ERROR();
-        // Does not return.
-      }
-    }
+//    shared_lock sl{data->mActionItem};
+//    switch(data->status)  // shared_lock
+//    {
+//      case CProgressGroup::S_PENDING:
+//      {
+//        if (data->textEditStatus == nullptr) // shared_lock
+//        {
+//          rv = std::make_unique<Wt::WText>(pendingText);  // shared_lock
+//          sl.unlock();
+//          unique_lock ul{data->mActionItem};
+//          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
+//        } // unique_lock unlocks
+//        break;
+//      }
+//      case CProgressGroup::S_ACTIVE:
+//      {
+//        if (data->textEditStatus != nullptr)  // shared_lock
+//        {
+//          sl.unlock();
+//          unique_lock ul{data->mActionItem};
+//          data->textEditStatus = nullptr;
+//          rv = std::make_unique<Wt::WProgressBar>();
+//          data->progressBar = dynamic_cast<Wt::WProgressBar *>(rv.get());
+//
+//        } // unique_lock unlocks
+//        sl.lock();
+//        if (data->progressBar && !data->updateRequired.test_and_set())
+//        {
+//          if (data->progress.holds_value<double>)
+//          {
+//            data->progressBar->setValue(std::get<double>(data->progress))
+//          }
+//          else if (data->progress.holds_value<std::array<std::uint64_t>[2])
+//          {
+//            data->progressBar->setValue(std::get<std::array<std::uint64_t>[2]>(data->progress));
+//          }
+//          else
+//          {
+//            // Not an error. May not have been updated yet.
+//          }
+//          sl.unlock();
+//        }
+//        break;
+//      }
+//      case CProgressGroup::S_COMPLETE:
+//      {
+//        if (data->progressBar != nullptr) // shared_lock
+//        {
+//          sl.unlock();
+//          unique_lock ul{data->mActionItem};
+//          data->progressBar = nullptr;
+//          rv = std::make_unique<Wt::WText>(completeText);
+//          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
+//        } // unique_lock unlocks
+//        break;
+//      }
+//      default:
+//      {
+//        CODE_ERROR();
+//        // Does not return.
+//      }
+//    }
     return std::move(rv);
   }
 
 private:
-  CProgressItemDelegate() = delete;
   CProgressItemDelegate(CProgressItemDelegate const &) = delete;
   CProgressItemDelegate(CProgressItemDelegate &&) = delete;
   CProgressItemDelegate &operator=(CProgressItemDelegate const &) = delete;
   CProgressItemDelegate &operator=(CProgressItemDelegate &&) = delete;
-
-  std::string const &pendingText;
-  std::string const &completeText;
 };
 
-/// @brief      Class constructor. This is the only way to construct the class and ensures that all parameters are set.
-/// @param[in]  a: The owning application. (Needed to synchronise/access the GUI thread)
-/// @param[in]  actionList: All the actions to be associated with the progress bar.
-/// @param[in]  il: The initialistation list. <itemID, itemText, initialText, finalText>
-/// @param[in]  pt: The text to use for pending items.
-/// @param[in]  ct: The text to use for completed items.
-/// @throws     std::bad_alloc
-/// @version    2024-04-29/GGB - Function created.
-
-CProgressGroup::CProgressGroup(Wt::WApplication &a,
-                               std::initializer_list<std::tuple<ID_t, ID_t, std::string>> &il,
-                               std::string const &pt, std::string const &ct)
-: application(a), pendingText(pt), completeText(ct)
+CProgressGroup::CProgressGroup(std::string const &pt, std::string const &ct)
 {
-  for (auto const &item: il)
-  {
-    items.emplace_back(std::get<0>(item), std::get<1>(item), std::get<2>(item), S_PENDING);
-  }
-
-  currentItem = items.begin();
-
-  model = std::make_shared<CProgressGroupModel>(items);
+  data.pendingText = pt;
+  data.completeText = ct;
+  model = std::make_shared<CProgressGroupModel>(data);
 
   createWidget();
 }
 
-
-/// @brief      Begin the next step. This can also be called to begin the first step.
-/// @note       completeStep() does not move onto the next step. It merely finishes the last step.
-/// @throws     CODE_ERROR(),
-/// @version    2024-04-29/GGB - Function created.
-
-void CProgressGroup::beginStep()
+void CProgressGroup::beginStep(ID_t actionID)
 {
-  if (currentItem != items.end())
-  {
-    if (currentItem->status != S_ACTIVE)
-    {
-      if (currentItem->status == S_PENDING)
-      {
-        currentItem->status = S_ACTIVE;
-      }
-      else if (currentItem->status == S_COMPLETE)
-      {
-        currentItem++;
-        currentItem->status = S_ACTIVE;
-      }
-      else
-      {
-        CODE_ERROR();
-        // Does not return.
-      }
-    }
-    else
-    {
-      CODE_ERROR();
-      // Does not return.
-    }
-  }
-  // Delete the text and replace with a progress bar
-  // Get the session lock.
-
-  Wt::WApplication::UpdateLock uiLock(&application);
-
-  if (uiLock)
-  {
-    treeView->refresh();
-  };
+  unique_lock ul{data.mData};
+  data.byID.at(actionID).get().status.store(S_ACTIVE);
 }
-
-/// @brief      Creates the widget sub-widgets.
-/// @throws
-/// @version    2024-04-29/GGB - Function created.
 
 void CProgressGroup::createWidget()
 {
   setLayoutSizeAware(true);
   setOverflow(Wt::Overflow::Scroll);
   treeView = addWidget(std::make_unique<Wt::WTreeView>());
-  treeView->setItemDelegateForColumn(1, std::make_shared<CProgressItemDelegate>(pendingText, completeText));
-
-  model = std::make_shared<CProgressGroupModel>(items);
+  treeView->setItemDelegateForColumn(1, std::make_shared<CProgressItemDelegate>());
   treeView->setModel(model);
 }
 
-/// @brief    Marks a step as completed. Does not move onto the next step. Changes the progress bar to a text exit.
-/// @throws
-/// @version  2024-04-29/GGB - Function created.
-
-void CProgressGroup::completeStep()
+void CProgressGroup::completeStep(ID_t actionID)
 {
-  if (currentItem != items.end())
-  {
-    if (currentItem->status != S_ACTIVE)
-    {
-      CODE_ERROR();
-    }
-    else
-    {
-      currentItem->status = S_COMPLETE;
-
-      // Delete the progress bar and replace with text.
-      // Get the session lock.
-      Wt::WApplication::UpdateLock uiLock(&application);
-
-      if (uiLock)
-      {
-        treeView->refresh();
-      };
-    }
-  }
+  unique_lock ul{data.mData};
+  data.byID.at(actionID).get().status.store(S_COMPLETE);
 }
 
-  /// @brief      Updates the progress bar. This will normally be done from outside the GUI thread.
-  /// @param[in]  p: The percentage complete.
-  /// @throws
-  /// @version    2024-04-29/GGB - Function created.
+void CProgressGroup::insertAction(ID_t actionID, ID_t parentID, std::string const &actionText)
+{
+  unique_lock ul{data.mData};
+  data.actions.emplace_front(actionID, parentID, actionText);
 
-  void CProgressGroup::updateStep(double p)
+  data.byID.emplace(actionID, std::ref(data.actions.front()));
+  ul.unlock();
+  data.recordsUpdated.clear();
+}
+
+  void CProgressGroup::updateStep(ID_t ID, double p)
   {
-    if (currentItem->progressBar != nullptr)
-    {
-      // Get the session lock.
-      Wt::WApplication::UpdateLock uiLock(&application);
-
-      if (uiLock)
-      {
-        currentItem->progressBar->setValue(p);
-      }
-    }
-    else
-    {
-      ERRORMESSAGE("CProgressGroup: Commands out of order.");
-    }
+//    if (currentItem->progressBar != nullptr)
+//    {
+//      // Get the session lock.
+//      Wt::WApplication::UpdateLock uiLock(&application);
+//
+//      if (uiLock)
+//      {
+//        //currentItem->progressBar->setValue(p);
+//      }
+//    }
+//    else
+//    {
+//      ERRORMESSAGE("CProgressGroup: Commands out of order.");
+//    }
   }
 
-  /// @brief      Updates the progress bar. This will normally be done from outside the GUI thread.
-  /// @param[in]  p: The percentage complete.
-  /// @throws
-  /// @version    2024-04-29/GGB - Function created.
-
-  void CProgressGroup::updateStep(double n, double d)
+  void CProgressGroup::updateStep(ID_t ID, std::uint64_t n, std::uint64_t d)
   {
-    updateStep(n/d);
+    updateStep(ID, n/d);
+  }
+
+  void CProgressGroup::updateThread()
+  {
+    /* Updating requires that updates be rolled up the tree. So any update on any item requires that sections of the tree be
+     * recalculated.
+     * This is likely going to be an expensive operation as the actions need to be locked for most of the process.
+     * Updating the tree can either be brute-forced. IE recalculate from bottom to top. This ensures each node is visited once and
+     * the tree updates correctly. (N)
+     * There are some potential alternative approaches available as nodes that have been updated are flagged.
+     * > Iterate the tree from bottom to top, only updating where required. (node->parent->parent). This is not ideal as the
+     *   worst case timing in (N!).
+     * > Another approach is to pre-process the tree. IE visit each node and create a subset of nodes tha need update. IE capture
+     *   the child->parent->parent nodes. A node cannot be added to the tree twice.
+     *   The subset can then be preOrdered and processed. This avoids calculating unnecessary nodes, but the pre-processing could
+     *   be expensice. preProcessing (N) postProcessing (<N) worst case (2N), best case (N)
+     * Based on this, probably the best approach is just to recalculate all.
+     * However, give each node a flag. preOrder iteratate. If the child has changed then force the parent to update. Updating a
+     * parent will fetch the updates from each child. So flag the children as update complete and then flag the parent as update
+     * required. This will allow quicker tree propogation and leave the tree with all flags reset at the end. Using an atomic_flag
+     * reduces the need to lock the records.
+     *
+     * Note: The tree is also recalculated after additions, but that is to determine the tree structure.
+     */
+
+    while (terminateThread.test_and_set())
+    {
+      std::this_thread::sleep_for(std::chrono::seconds(updatePeriod));
+      if (!updatesReceived.test_and_set())
+      {
+        shared_lock slData{data.mData}; // Need a shared lock on the data. (Prevent any updates of the tree.)
+        for (auto &node: data.preOrderTree)
+        {
+          if (!node.get().recalcRequired.test_and_set())
+          {
+            node.get().updateRequired.clear();
+            ID_t nodeID = data.byID.at(node.get().ID).get().PID;
+
+            // Recalculate the parent.
+            std::vector<ID_t> children = data.parentChild.children(nodeID);
+            double progress = 0.0;
+            for (auto const &child: children)
+            {
+              progress += data.byID.at(child).get().progress;
+              if (!data.byID.at(child).get().recalcRequired.test_and_set())      // Children won't force a recalc.
+              {
+                data.byID.at(child).get().updateRequired.clear();
+              }
+            };
+            data.byID.at(nodeID).get().progress.store(progress / children.size());
+            data.byID.at(nodeID).get().recalcRequired.clear();     // Force a recalc of the parent's parent.
+          }
+          Wt::WApplication *application = Wt::WApplication::instance(); // Get this instance.
+        }
+      }
+    }
   }

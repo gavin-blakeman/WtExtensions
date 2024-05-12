@@ -14,6 +14,7 @@ set(SOURCES
   source/extensions.cpp
   source/extendedProgressBar.cpp
   source/fileListWidget.cpp
+  source/fileUploadWidget.cpp
   source/loggerSink.cpp
   source/moneyValidator.cpp
   source/progressGroup.cpp
@@ -30,6 +31,7 @@ set(HEADERS
   include/extendedTimeEdit.h
   include/extensions.h
   include/fileListWidget.h
+  include/fileUploadWidget.h
   include/loggerSink.h
   include/moneyValidator.h
   include/progressGroup.h
