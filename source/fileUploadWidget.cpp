@@ -35,8 +35,10 @@
 #include <map>
 
 // Wt++ header files
+#include <Wt/WApplication.h>
 #include <Wt/WAbstractItemDelegate.h>
 #include <Wt/WAbstractItemModel.h>
+#include <Wt/WModelIndex.h>
 #include <Wt/WProgressBar.h>
 #include <Wt/WTableView.h>
 #include <Wt/WText.h>
@@ -55,29 +57,21 @@
 class CFileListModel final : public Wt::WAbstractItemModel
 {
 public:
-  using row_t = std::size_t;
+  using mutex_type = CFileUploadWidget::mutex_type;
+  using unique_lock = CFileUploadWidget::unique_lock;
+  using shared_lock = CFileUploadWidget::shared_lock;
   using ID_t = CFileUploadWidget::ID_t;
-  struct record_t
-  {
-    ID_t ID;
-    row_t row;
-    Wt::WFileDropWidget::File *file;
-    CFileUploadWidget::status_e status;
-    std::string fileType;
-    Wt::WText *textEditStatus = nullptr;
-    Wt::WProgressBar *progressBar = nullptr;
-    std::uint64_t dataReceived[2] = {0, 0};
-    Wt::Signals::connection dataReceivedConnection;
-  };
-  using value_type = record_t;
-  using reference = value_type &;
-  using const_reference = value_type const &;
-  using pointer = value_type *;
-  using const_pointer = value_type const *;
-  using value_list = std::list<value_type>;
-  using value_ref = std::reference_wrapper<value_type>;
+  using fileData_t = CFileUploadWidget::fileData_t;
+  using value_type = CFileUploadWidget::value_type;
+  using reference = CFileUploadWidget::reference;
+  using const_reference = CFileUploadWidget::const_reference;
+  using pointer = CFileUploadWidget::pointer;
+  using const_pointer = CFileUploadWidget::const_pointer;
+  using value_list = CFileUploadWidget::value_list;
+  using value_ref = CFileUploadWidget::value_ref;
 
-  CFileListModel() {}
+
+  CFileListModel(fileData_t &fd) : fileData(fd) {}
   virtual ~CFileListModel() = default;
 
   /*! @brief      Insert a new file into the model.
@@ -87,11 +81,11 @@ public:
 
   void insert_back(Wt::WFileDropWidget::File *file)
   {
-    ID_t ID = ++lastID;
-    records_.emplace_back(ID, byRow.size(), file, CFileUploadWidget::S_PENDING);
-    byID.emplace(ID, std::ref(records_.back()));
-    byPointer.emplace(file, std::ref(records_.back()));
-    byRow.emplace_back(std::ref(records_.back()));
+    ID_t ID = ++fileData.lastID;
+    fileData.records.emplace_back(ID, fileData.byRow.size(), file, CFileUploadWidget::S_PENDING);
+    fileData.byID.emplace(ID, std::ref(fileData.records.back()));
+    fileData.byPointer.emplace(file, std::ref(fileData.records.back()));
+    fileData.byRow.emplace_back(std::ref(fileData.records.back()));
     reset();
   }
 
@@ -110,19 +104,22 @@ public:
     }
   }
 
-  void setCurrentFile(Wt::WFileDropWidget::File *cf) noexcept
+  void setCurrentFile(Wt::WFileDropWidget::File *cf)
   {
-    if (currentFile && byPointer.contains(currentFile))
+    /* This function is called from the GUI thread. */
+
+    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
     {
-      byPointer.at(currentFile).get().dataReceivedConnection.disconnect();
+      //fileData.byPointer.at(fileData.currentFile).get().dataReceivedConnection.disconnect();
     }
 
-    currentFile = cf;
-    if (currentFile && byPointer.contains(currentFile))
+    fileData.currentFile = cf;
+    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
     {
-      byPointer.at(currentFile).get().dataReceivedConnection = currentFile->dataReceived().connect(this,
-                                                                                                   &CFileListModel::dataReceived);
-      byPointer.at(currentFile).get().status = CFileUploadWidget::S_UPLOADING;
+      fileData.byPointer.at(fileData.currentFile).get().dataReceivedConnection = fileData.currentFile->dataReceived().connect(this,
+                                                                                                                              &CFileListModel::dataReceived);
+      fileData.byPointer.at(fileData.currentFile).get().status = CFileUploadWidget::S_UPLOADING;
+      reset();
     }
     else
     {
@@ -179,11 +176,11 @@ protected:
     return returnValue;
 
   }
-  virtual int rowCount(const Wt::WModelIndex &) const override { return records_.size(); }
+  virtual int rowCount(const Wt::WModelIndex &) const override { return fileData.records.size(); }
   virtual Wt::WModelIndex index(int row, int column, const Wt::WModelIndex &parent = Wt::WModelIndex()) const override
   {
     RUNTIME_ASSERT(column < 3, "CRequirementsWidget::index: Column number out of range.");
-    RUNTIME_ASSERT(row < records_.size(), "CRequirementsWidget::index: Row number out of range.");
+    RUNTIME_ASSERT(row < fileData.records.size(), "CRequirementsWidget::index: Row number out of range.");
     return createIndex(row, column, nullptr);
   }
 
@@ -198,7 +195,7 @@ protected:
     std::size_t row = static_cast<std::size_t>(index.row());
     std::size_t column = static_cast<std::size_t>(index.column());
 
-    RUNTIME_ASSERT(byRow.size() > row, "CFileListModel::data: Incorrect row number.");
+    RUNTIME_ASSERT(fileData.byRow.size() > row, "CFileListModel::data: Incorrect row number.");
 
     switch (column)
     {
@@ -208,7 +205,7 @@ protected:
         {
           case Wt::ItemDataRole::Display:
           {
-            rv = static_cast<std::string>(byRow[row].get().file->clientFileName());
+            rv = static_cast<std::string>(fileData.byRow[row].get().file->clientFileName());
           }
           default:
           {
@@ -223,12 +220,12 @@ protected:
         {
           case Wt::ItemDataRole::Display:
           {
-            rv = byRow[row].get().fileType;
+            rv = fileData.byRow[row].get().fileType;
             break;
           }
           case Wt::ItemDataRole::User:
           {
-              rv = &(byRow[row].get());
+            rv = &(fileData.byRow[row].get());
             break;
           }
           default:
@@ -270,34 +267,30 @@ protected:
   void dataReceived(std::uint64_t num, std::uint64_t denom)
   {
     TRACE_ENTER();
-    if (currentFile && byPointer.contains(currentFile))
+    shared_lock sl{fileData.mData};
+    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
     {
-      byPointer.at(currentFile).get().dataReceived[0] = num;
-      byPointer.at(currentFile).get().dataReceived[1] = denom;
+      TRACEMESSAGE(fmt::format("Num: {}, Denom: {}", num, denom));
+      fileData.byPointer.at(fileData.currentFile).get().progress.store(num/denom);
+      fileData.byPointer.at(fileData.currentFile).get().recordUpdated.clear();
     }
     else
     {
       CODE_ERROR();
       // Does not return.
     }
-    reset();
     TRACE_EXIT();
   }
 
 private:
+  CFileListModel() = delete;
   CFileListModel(int rows, int columns) = delete;
   CFileListModel(CFileListModel const &) = delete;
   CFileListModel(CFileListModel &&) = delete;
   CFileListModel &operator=(CFileListModel const &) = delete;
   CFileListModel &operator=(CFileListModel &&) = delete;
 
-  value_list records_;     // All the records.
-  std::map<ID_t, value_ref> byID;
-  std::map<Wt::WFileDropWidget::File *, value_ref> byPointer;
-  std::vector<value_ref> byRow;
-  Wt::WFileDropWidget::File *currentFile = nullptr;
-  ID_t lastID = 0;
-
+  fileData_t &fileData;
 };
 
 /// Implements the delegate to display the progress bar or the text.
@@ -310,35 +303,42 @@ public:
 protected:
   virtual std::unique_ptr<Wt::WWidget> update(Wt::WWidget *widget, Wt::WModelIndex const &index, Wt::WFlags<Wt::ViewItemRenderFlag>)
   {
+    /* This function should only be called from the GUI thread. */
+
     std::unique_ptr<Wt::WWidget> rv;
 
-    CFileListModel::pointer data = std::any_cast<CFileListModel::pointer>(index.data(Wt::ItemDataRole::User));
+    std::cout << " Row: " << index.row() << " Column: " << index.column() << std::endl;
 
+    CFileListModel::pointer data = std::any_cast<CFileListModel::pointer>(index.data(Wt::ItemDataRole::User));
     CFileListModel const *model = dynamic_cast<CFileListModel const *>(index.model());
+
+    std::cout << "Widget: " << reinterpret_cast<std::uint64_t>(widget) << " textEdit: " << reinterpret_cast<std::uint64_t>(data->textEditStatus.load());
+    std::cout << " progressBar: " << reinterpret_cast<uint64_t>(data->progressBar.load()) << std::endl;
 
     switch(data->status)
     {
       case CFileUploadWidget::S_PENDING:
       {
+        std::cout << "Pending" << std::endl;
         if (data->textEditStatus == nullptr)
         {
           rv = std::make_unique<Wt::WText>("Pending");
-          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
+          data->textEditStatus.store(dynamic_cast<Wt::WText *>(rv.get()));
         }
         break;
       }
       case CFileUploadWidget::S_UPLOADING:
       {
+        std::cout << "Uploading" << std::endl;
         if (data->textEditStatus != nullptr)
         {
-          data->textEditStatus = nullptr;
+          data->textEditStatus.store(nullptr);
           rv = std::make_unique<Wt::WProgressBar>();
-          data->progressBar = dynamic_cast<Wt::WProgressBar *>(rv.get());
+          data->progressBar.store(dynamic_cast<Wt::WProgressBar *>(rv.get()));
         }
         else if (data->progressBar)
         {
-          data->progressBar->setRange(0, data->dataReceived[1]);
-          data->progressBar->setValue(data->dataReceived[0]);
+          data->progressBar.load()->setValue(data->progress.load());
         }
         else
         {
@@ -349,12 +349,13 @@ protected:
       }
       case CFileUploadWidget::S_COMPLETE:
       {
-//        if (data->progressBar != nullptr)
-//        {
-//          data->progressBar = nullptr;
-//          rv = std::make_unique<Wt::WText>(completeText);
-//          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
-//        }
+        std::cout << "Complete" << std::endl;
+        if (data->progressBar != nullptr)
+        {
+          data->progressBar = nullptr;
+          rv = std::make_unique<Wt::WText>("Upload Complete");
+          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
+        }
         break;
       }
       default:
@@ -363,6 +364,8 @@ protected:
         // Does not return.
       }
     }
+    std::cout << "Widget: " << reinterpret_cast<std::uint64_t>(widget) << " textEdit: " << reinterpret_cast<std::uint64_t>(data->textEditStatus.load());
+        std::cout << " progressBar: " << reinterpret_cast<uint64_t>(data->progressBar.load()) << std::endl;
     return std::move(rv);
   }
 
@@ -377,8 +380,9 @@ private:
 
 CFileUploadWidget::CFileUploadWidget() : Wt::WFileDropWidget()
 {
-  model = std::make_shared<CFileListModel>();
+  model = std::make_shared<CFileListModel>(fileData);
   createUI();
+  startUp();
 }
 
 void CFileUploadWidget::createUI()
@@ -397,7 +401,7 @@ void CFileUploadWidget::createUI()
   tableView->setItemDelegateForColumn(1, std::make_shared<CFileListDelegate>());
 
   drop().connect([&](const std::vector<Wt::WFileDropWidget::File*>& files)
-  {
+                 {
     model->insert_back(files.begin(), files.end());
 
     // If the maximum number of files has been met or exceeded, don't allow any more drops.
@@ -405,15 +409,18 @@ void CFileUploadWidget::createUI()
     {
       setAcceptDrops(false);
     }
- });
- newUpload().connect(this, &CFileUploadWidget::fileUploadStarting);
- uploaded().connect(this, &CFileUploadWidget::fileUploaded);
+                 });
+  newUpload().connect(this, &CFileUploadWidget::fileUploadStarting);
+  uploaded().connect(this, &CFileUploadWidget::fileUploaded);
 }
 
 void CFileUploadWidget::fileUploadStarting(Wt::WFileDropWidget::File *file)
 {
+  /* This function is called from the GUI thread. */
+
+  TRACE_ENTER();
   model->setCurrentFile(file);
-  tableView->refresh();
+  TRACE_EXIT();
 }
 
 
@@ -421,3 +428,58 @@ void CFileUploadWidget::fileUploaded(Wt::WFileDropWidget::File* file)
 {
 
 }
+
+void CFileUploadWidget::shutDown()
+{
+  terminateThread.test_and_set();
+  if (updateThreadPtr)
+  {
+    fileData.progressUpdate.clear();         // Unblock the thread.
+
+    updateThreadPtr->join();
+    updateThreadPtr.reset(nullptr);
+  }
+  IMPLEMENT_ME(); // Need to implement the code to close the loadThreads.
+}
+
+void CFileUploadWidget::startUp()
+{
+  terminateThread.clear();
+  if (!updateThreadPtr)
+  {
+    updateThreadPtr = std::make_unique<std::thread>(&CFileUploadWidget::updateThread, this);
+
+    if (!updateThreadPtr)
+    {
+      RUNTIME_ERROR(boost::locale::translate("CFileUploadWidget: Unable to start updateThread."));
+    };
+  }
+}
+
+void CFileUploadWidget::updateThread()
+{
+  while (terminateThread.test_and_set())
+  {
+    std::this_thread::sleep_for(std::chrono::seconds(updatePeriod));
+    if (!fileData.progressUpdate.test_and_set())
+    {
+      shared_lock slData{fileData.mData}; // Need a shared lock on the data. (Prevent any updates of the tree.)
+      for (auto &record: fileData.records)
+      {
+        if (!record.recordUpdated.test_and_set())
+        {
+          if (record.progressBar)
+          {
+            Wt::WApplication *application = Wt::WApplication::instance(); // Get this instance.
+            Wt::WApplication::UpdateLock uiLock(application);
+            if (uiLock)
+            {
+              record.progressBar.load()->setValue(record.progress.load());
+            }
+          };
+        };
+      }
+    }
+  }
+}
+

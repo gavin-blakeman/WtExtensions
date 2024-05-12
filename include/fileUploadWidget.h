@@ -32,11 +32,16 @@
 #define WTEXTENSIONS_WFILEUPLOADWIDGET_H_
 
 // Standard C++ library header files
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <semaphore>
+#include <shared_mutex>
 #include <string>
+#include <thread>
 
 // Wt++ header files
 #include <Wt/WFileDropWidget.h>
@@ -55,6 +60,9 @@ class CFileListModel;
 class CFileUploadWidget : public Wt::WFileDropWidget
 {
 public:
+  using mutex_type = std::shared_mutex;
+  using unique_lock = std::unique_lock<mutex_type>;
+  using shared_lock = std::shared_lock<mutex_type>;
   enum status_e
   {
     S_NONE,         //
@@ -62,9 +70,48 @@ public:
     S_UPLOADING,    // The file is uploading.
     S_COMPLETE,     // The action is complete. The finalText is displayed.
   };
-  using ID_t = std::uint32_t;  typedef void (*updateProgress_f)(double, double);
+  using ID_t = std::uint32_t;
+  using row_t = std::size_t;
+  struct record_t
+  {
+    ID_t ID;
+    row_t row;
+    Wt::WFileDropWidget::File *file;
+    CFileUploadWidget::status_e status;
+    std::string fileType;
+    std::atomic<Wt::WText *> textEditStatus {nullptr};
+    std::atomic<Wt::WProgressBar *>progressBar{nullptr};
+    std::atomic<double> progress = {0.0};
+    std::atomic_flag recordUpdated;
+    Wt::Signals::connection dataReceivedConnection;
+    mutex_type mRecord;
+  };
+  using value_type = record_t;
+  using reference = value_type &;
+  using const_reference = value_type const &;
+  using pointer = value_type *;
+  using const_pointer = value_type const *;
+  using value_list = std::list<value_type>;
+  using value_ref = std::reference_wrapper<value_type>;
+  typedef void (*updateProgress_f)(double, double);
+
+
   // Callback function allowing the application to set the type text for the uploaded file.
   typedef std::string (*fileType_f)(std::filesystem::path const &, std::filesystem::path const &);
+
+  struct fileData_t
+  {
+    mutex_type mData;                                 // To read or update any of the fields in data this mutex must be held.
+    value_list files;
+    std::atomic_flag filesUpdated;
+    value_list records;     // All the records.
+    std::map<ID_t, value_ref> byID;
+    std::map<Wt::WFileDropWidget::File *, value_ref> byPointer;
+    std::vector<value_ref> byRow;
+    Wt::WFileDropWidget::File *currentFile = nullptr;
+    ID_t lastID = 0;
+    std::atomic_flag progressUpdate;
+  };
 
   /*! @brief      Constructor
    *  @throws
@@ -113,9 +160,25 @@ private:
   CFileUploadWidget &operator=(CFileUploadWidget const &) = delete;
   CFileUploadWidget &operator=(CFileUploadWidget &&) = delete;
 
+  fileData_t fileData;
   std::uint16_t maxFiles_ = 50;
+  std::uint16_t updatePeriod = 1;
+  std::atomic_flag terminateThread;
+  std::unique_ptr<std::thread> updateThreadPtr;
 
+  /*! @brief      The thread that is used to update the GUI periodically.
+   */
+  void updateThread();
 
+  /*! @brief      Shuts the threads down.
+   *
+   */
+  void shutDown();
+
+  /*! @brief      Starts the relevant threads running.
+   *  @throws
+   */
+  void startUp();
 };
 
 
