@@ -79,12 +79,14 @@ public:
     Wt::WFileDropWidget::File *file;
     CFileUploadWidget::status_e status;
     std::string fileType;
-    std::atomic<Wt::WText *> textEditStatus {nullptr};
-    std::atomic<Wt::WProgressBar *>progressBar{nullptr};
-    std::atomic<double> progress = {0.0};
+    Wt::WText * textEditStatus = nullptr;
+    Wt::WProgressBar *progressBar = nullptr;
+    double lastUpdate = 0;
     std::atomic_flag recordUpdated;
     Wt::Signals::connection dataReceivedConnection;
+    Wt::Signals::connection uploadCompleteConnection;
     mutex_type mRecord;
+    std::string completedText = "Upload Completed";
   };
   using value_type = record_t;
   using reference = value_type &;
@@ -125,8 +127,14 @@ public:
    *  @param[in]  mf: The maximum number of files.
    *  @throws     noexcept
    */
-
   void maxFiles(std::size_t mf) noexcept { maxFiles_ = mf;}
+
+  /*! @brief      Sets the file's completed text.
+   *  @param[in]  fileID: the file's ID.
+   *  @param[in]  ct: completedText
+   *  @throws
+   */
+  void setCompletedText(ID_t fileID, std::string const &ct);
 
 protected:
   Wt::WTableView *tableView = nullptr;
@@ -143,16 +151,15 @@ protected:
    */
   std::size_t maxFiles() const noexcept { return maxFiles_; }
 
-  /*! @brief      Function called when a file has been uploaded.
-   *  @throws
-   */
-  void fileUploaded(Wt::WFileDropWidget::File *file);
-
   /*! @brief      Responds to the signal when a new upload is going to start.
    *  @param[in]  file: The file being uploaded.
    */
   void fileUploadStarting(Wt::WFileDropWidget::File *file);
 
+  /*! @brief      Function called when files are dropped in the control.
+   *  @param[in]  files: The files being dropped.
+   */
+ void filesDropped(std::vector<Wt::WFileDropWidget::File *> const& files);
 
 private:
   CFileUploadWidget(CFileUploadWidget const &) = delete;
@@ -162,23 +169,6 @@ private:
 
   fileData_t fileData;
   std::uint16_t maxFiles_ = 50;
-  std::uint16_t updatePeriod = 1;
-  std::atomic_flag terminateThread;
-  std::unique_ptr<std::thread> updateThreadPtr;
-
-  /*! @brief      The thread that is used to update the GUI periodically.
-   */
-  void updateThread();
-
-  /*! @brief      Shuts the threads down.
-   *
-   */
-  void shutDown();
-
-  /*! @brief      Starts the relevant threads running.
-   *  @throws
-   */
-  void startUp();
 };
 
 

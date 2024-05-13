@@ -81,12 +81,16 @@ public:
 
   void insert_back(Wt::WFileDropWidget::File *file)
   {
+    /* Called from within the GUI thread. */
+
+    shared_lock sl{fileData.mData};
     ID_t ID = ++fileData.lastID;
     fileData.records.emplace_back(ID, fileData.byRow.size(), file, CFileUploadWidget::S_PENDING);
     fileData.byID.emplace(ID, std::ref(fileData.records.back()));
     fileData.byPointer.emplace(file, std::ref(fileData.records.back()));
     fileData.byRow.emplace_back(std::ref(fileData.records.back()));
-    reset();
+    Wt::WModelIndex modelIndex;
+    rowsInserted().emit(modelIndex, fileData.byRow.size() - 1, fileData.byRow.size() - 1);
   }
 
   /*! @brief      Insert a range of files into the model.
@@ -104,28 +108,57 @@ public:
     }
   }
 
-  void setCurrentFile(Wt::WFileDropWidget::File *cf)
+  /*! @brief      Sets the file's completed text.
+   *  @param[in]  fileID: the file's ID.
+   *  @param[in]  ct: completedText
+   *  @throws
+   */
+  void setCompletedText(ID_t fileID, std::string const &ct)
   {
-    /* This function is called from the GUI thread. */
-
-    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
+    shared_lock sl{fileData.mData};
+    if (fileData.byID.contains(fileID))
     {
-      //fileData.byPointer.at(fileData.currentFile).get().dataReceivedConnection.disconnect();
-    }
-
-    fileData.currentFile = cf;
-    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
-    {
-      fileData.byPointer.at(fileData.currentFile).get().dataReceivedConnection = fileData.currentFile->dataReceived().connect(this,
-                                                                                                                              &CFileListModel::dataReceived);
-      fileData.byPointer.at(fileData.currentFile).get().status = CFileUploadWidget::S_UPLOADING;
-      reset();
+      fileData.byID.at(fileID).get().completedText = ct;
+      Wt::WModelIndex modelIndex = createIndex(fileData.byID.at(fileID).get().row, 1,  nullptr);
+      dataChanged().emit(modelIndex, modelIndex);
     }
     else
     {
       CODE_ERROR();
-
       // Does not return.
+    }
+  }
+
+  void setCurrentFile(Wt::WFileDropWidget::File *cf)
+  {
+    /* This function is called from the GUI thread. */
+
+    shared_lock sl{fileData.mData};
+    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
+    {
+      reference temp = fileData.byPointer.at(fileData.currentFile).get();
+      sl.unlock();
+      temp.dataReceivedConnection.disconnect();
+      temp.uploadCompleteConnection.disconnect();
+      temp.status = CFileUploadWidget::S_COMPLETE;
+      Wt::WModelIndex modelIndex = createIndex(fileData.byPointer.at(fileData.currentFile).get().row, 1,  nullptr);
+      dataChanged().emit(modelIndex, modelIndex);
+    }
+
+    fileData.currentFile = cf;    // May be setting to nullptr.
+    if (!sl)
+    {
+      sl.lock();
+    }
+    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
+    {
+      reference temp = fileData.byPointer.at(fileData.currentFile).get();
+      sl.unlock();
+      temp.dataReceivedConnection = fileData.currentFile->dataReceived().connect(this, &CFileListModel::dataReceived);
+      temp.uploadCompleteConnection = fileData.currentFile->uploaded().connect(this, &CFileListModel::uploadFinished);
+      temp.status = CFileUploadWidget::S_UPLOADING;
+      Wt::WModelIndex modelIndex = createIndex(fileData.byPointer.at(fileData.currentFile).get().row, 1,  nullptr);
+      dataChanged().emit(modelIndex, modelIndex);
     }
   }
 
@@ -266,20 +299,42 @@ protected:
 
   void dataReceived(std::uint64_t num, std::uint64_t denom)
   {
-    TRACE_ENTER();
+    /* This is called by GUI thread. */
+
     shared_lock sl{fileData.mData};
     if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
     {
-      TRACEMESSAGE(fmt::format("Num: {}, Denom: {}", num, denom));
-      fileData.byPointer.at(fileData.currentFile).get().progress.store(num/denom);
-      fileData.byPointer.at(fileData.currentFile).get().recordUpdated.clear();
+      if (fileData.byPointer.at(fileData.currentFile).get().progressBar)
+      {
+        double temp = static_cast<double>(num)/static_cast<double>(denom) * 100;
+
+        if ( ((temp - fileData.byPointer.at(fileData.currentFile).get().lastUpdate)) >= 10)
+        {
+          fileData.byPointer.at(fileData.currentFile).get().progressBar->setValue(temp);
+          fileData.byPointer.at(fileData.currentFile).get().lastUpdate = temp;
+        }
+
+      }
     }
     else
     {
       CODE_ERROR();
       // Does not return.
     }
-    TRACE_EXIT();
+  }
+
+  void uploadFinished()
+  {
+    shared_lock sl{fileData.mData};
+    if (fileData.currentFile && fileData.byPointer.contains(fileData.currentFile))
+    {
+      setCurrentFile(nullptr);
+    }
+    else
+    {
+      CODE_ERROR();
+      // Does not return.
+    }
   }
 
 private:
@@ -307,38 +362,31 @@ protected:
 
     std::unique_ptr<Wt::WWidget> rv;
 
-    std::cout << " Row: " << index.row() << " Column: " << index.column() << std::endl;
-
     CFileListModel::pointer data = std::any_cast<CFileListModel::pointer>(index.data(Wt::ItemDataRole::User));
     CFileListModel const *model = dynamic_cast<CFileListModel const *>(index.model());
-
-    std::cout << "Widget: " << reinterpret_cast<std::uint64_t>(widget) << " textEdit: " << reinterpret_cast<std::uint64_t>(data->textEditStatus.load());
-    std::cout << " progressBar: " << reinterpret_cast<uint64_t>(data->progressBar.load()) << std::endl;
 
     switch(data->status)
     {
       case CFileUploadWidget::S_PENDING:
       {
-        std::cout << "Pending" << std::endl;
         if (data->textEditStatus == nullptr)
         {
           rv = std::make_unique<Wt::WText>("Pending");
-          data->textEditStatus.store(dynamic_cast<Wt::WText *>(rv.get()));
+          data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
         }
         break;
       }
       case CFileUploadWidget::S_UPLOADING:
       {
-        std::cout << "Uploading" << std::endl;
         if (data->textEditStatus != nullptr)
         {
-          data->textEditStatus.store(nullptr);
+          data->textEditStatus = nullptr;
           rv = std::make_unique<Wt::WProgressBar>();
-          data->progressBar.store(dynamic_cast<Wt::WProgressBar *>(rv.get()));
+          data->progressBar = dynamic_cast<Wt::WProgressBar *>(rv.get());
+          data->progressBar->setRange(0, 100);
         }
         else if (data->progressBar)
         {
-          data->progressBar.load()->setValue(data->progress.load());
         }
         else
         {
@@ -349,11 +397,10 @@ protected:
       }
       case CFileUploadWidget::S_COMPLETE:
       {
-        std::cout << "Complete" << std::endl;
         if (data->progressBar != nullptr)
         {
           data->progressBar = nullptr;
-          rv = std::make_unique<Wt::WText>("Upload Complete");
+          rv = std::make_unique<Wt::WText>(data->completedText);
           data->textEditStatus = dynamic_cast<Wt::WText *>(rv.get());
         }
         break;
@@ -364,8 +411,6 @@ protected:
         // Does not return.
       }
     }
-    std::cout << "Widget: " << reinterpret_cast<std::uint64_t>(widget) << " textEdit: " << reinterpret_cast<std::uint64_t>(data->textEditStatus.load());
-        std::cout << " progressBar: " << reinterpret_cast<uint64_t>(data->progressBar.load()) << std::endl;
     return std::move(rv);
   }
 
@@ -382,7 +427,6 @@ CFileUploadWidget::CFileUploadWidget() : Wt::WFileDropWidget()
 {
   model = std::make_shared<CFileListModel>(fileData);
   createUI();
-  startUp();
 }
 
 void CFileUploadWidget::createUI()
@@ -400,86 +444,32 @@ void CFileUploadWidget::createUI()
   tableView->setEditTriggers(Wt::EditTrigger::None);
   tableView->setItemDelegateForColumn(1, std::make_shared<CFileListDelegate>());
 
-  drop().connect([&](const std::vector<Wt::WFileDropWidget::File*>& files)
-                 {
-    model->insert_back(files.begin(), files.end());
-
-    // If the maximum number of files has been met or exceeded, don't allow any more drops.
-    if (uploads().size() >= maxFiles_)
-    {
-      setAcceptDrops(false);
-    }
-                 });
+  drop().connect(this, &CFileUploadWidget::filesDropped);
   newUpload().connect(this, &CFileUploadWidget::fileUploadStarting);
-  uploaded().connect(this, &CFileUploadWidget::fileUploaded);
 }
 
 void CFileUploadWidget::fileUploadStarting(Wt::WFileDropWidget::File *file)
 {
   /* This function is called from the GUI thread. */
 
-  TRACE_ENTER();
   model->setCurrentFile(file);
-  TRACE_EXIT();
 }
 
-
-void CFileUploadWidget::fileUploaded(Wt::WFileDropWidget::File* file)
+void CFileUploadWidget::filesDropped(std::vector<Wt::WFileDropWidget::File*> const& files)
 {
+  model->insert_back(files.begin(), files.end());
 
-}
-
-void CFileUploadWidget::shutDown()
-{
-  terminateThread.test_and_set();
-  if (updateThreadPtr)
+  // If the maximum number of files has been met or exceeded, don't allow any more drops.
+  if (uploads().size() >= maxFiles_)
   {
-    fileData.progressUpdate.clear();         // Unblock the thread.
-
-    updateThreadPtr->join();
-    updateThreadPtr.reset(nullptr);
-  }
-  IMPLEMENT_ME(); // Need to implement the code to close the loadThreads.
-}
-
-void CFileUploadWidget::startUp()
-{
-  terminateThread.clear();
-  if (!updateThreadPtr)
-  {
-    updateThreadPtr = std::make_unique<std::thread>(&CFileUploadWidget::updateThread, this);
-
-    if (!updateThreadPtr)
-    {
-      RUNTIME_ERROR(boost::locale::translate("CFileUploadWidget: Unable to start updateThread."));
-    };
+    setAcceptDrops(false);
   }
 }
 
-void CFileUploadWidget::updateThread()
+void CFileUploadWidget::setCompletedText(ID_t fileID, std::string const &ct)
 {
-  while (terminateThread.test_and_set())
-  {
-    std::this_thread::sleep_for(std::chrono::seconds(updatePeriod));
-    if (!fileData.progressUpdate.test_and_set())
-    {
-      shared_lock slData{fileData.mData}; // Need a shared lock on the data. (Prevent any updates of the tree.)
-      for (auto &record: fileData.records)
-      {
-        if (!record.recordUpdated.test_and_set())
-        {
-          if (record.progressBar)
-          {
-            Wt::WApplication *application = Wt::WApplication::instance(); // Get this instance.
-            Wt::WApplication::UpdateLock uiLock(application);
-            if (uiLock)
-            {
-              record.progressBar.load()->setValue(record.progress.load());
-            }
-          };
-        };
-      }
-    }
-  }
+  model->setCompletedText(fileID, ct);
 }
+
+
 
