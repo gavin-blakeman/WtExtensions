@@ -40,6 +40,7 @@
 #include <Wt/WAbstractItemModel.h>
 #include <Wt/WModelIndex.h>
 #include <Wt/WProgressBar.h>
+#include <Wt/WServer.h>
 #include <Wt/WTableView.h>
 #include <Wt/WText.h>
 
@@ -48,7 +49,7 @@
 #include <GCL>
 #include <boost/locale.hpp>
 
-/* NOTES: 1. The File member of Wt::WFileDropWdget has a private member id_ that can be accesssed through a public (but undocumented
+/* NOTES: 1. The File member of Wt::WFileDropWdget has a private member id_ that can be accessed through a public (but undocumented
  *           function) uploadID().
  *        2. The File member is stored in the vector of Files as a std::unique_ptr. So the address of the file object should not
  *           change.
@@ -110,17 +111,28 @@ public:
 
   /*! @brief      Sets the file's completed text.
    *  @param[in]  fileID: the file's ID.
-   *  @param[in]  ct: completedText
+   *  @param[in]  ct: completedText (must be a copy as a ref would sit in another thread and may be destroyed)
    *  @throws
    */
-  void setCompletedText(ID_t fileID, std::string const &ct)
+  void setCompletedText(ID_t fileID, std::string ct)
   {
+    /* Can be called from outside the GUI thread. */
+
+    std::cout << "FileID: " << fileID << std::endl;
     shared_lock sl{fileData.mData};
     if (fileData.byID.contains(fileID))
     {
       fileData.byID.at(fileID).get().completedText = ct;
-      Wt::WModelIndex modelIndex = createIndex(fileData.byID.at(fileID).get().row, 1,  nullptr);
-      dataChanged().emit(modelIndex, modelIndex);
+      if (fileData.byID.at(fileID).get().textEditStatus)
+      {
+        fileData.byID.at(fileID).get().textEditStatus->setText(ct);
+      }
+      else
+      {
+        Wt::WModelIndex modelIndex = createIndex(fileData.byID.at(fileID).get().row, 1,  nullptr);
+        sl.unlock();
+        dataChanged().emit(modelIndex, modelIndex);
+      };
     }
     else
     {
@@ -423,7 +435,7 @@ private:
 
 /**********************************************************************************************************************************/
 
-CFileUploadWidget::CFileUploadWidget() : Wt::WFileDropWidget()
+CFileUploadWidget::CFileUploadWidget(Wt::WApplication &a) : Wt::WFileDropWidget(), application(a)
 {
   model = std::make_shared<CFileListModel>(fileData);
   createUI();
@@ -468,7 +480,15 @@ void CFileUploadWidget::filesDropped(std::vector<Wt::WFileDropWidget::File*> con
 
 void CFileUploadWidget::setCompletedText(ID_t fileID, std::string const &ct)
 {
-  model->setCompletedText(fileID, ct);
+  std::cout << "FileID: " << fileID << std::endl;
+  Wt::WApplication::UpdateLock uiLock(&application);
+
+  if (uiLock)
+  {
+    std::cout << "FileID: " << fileID << std::endl;
+    model->setCompletedText(fileID, ct);
+  };
+  application.triggerUpdate();
 }
 
 

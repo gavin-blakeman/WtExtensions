@@ -58,7 +58,7 @@ public:
     OPTIONAL,
   };
 
-  CRequirementsWidget();
+  CRequirementsWidget(Wt::WApplication &);
   virtual ~CRequirementsWidget() = default;
 
   void insert(ID_t, std::string &&, requirementType_e);
@@ -74,12 +74,14 @@ protected:
 
 
 private:
+  CRequirementsWidget() = delete;
   CRequirementsWidget(CRequirementsWidget const &) = delete;
   CRequirementsWidget(CRequirementsWidget &&) = delete;
   CRequirementsWidget &operator=(CRequirementsWidget const &) = delete;
   CRequirementsWidget &operator==(CRequirementsWidget &&) = delete;
 
   std::shared_ptr<Wt::WAbstractItemModel> model;
+  Wt::WApplication &application;
 };
 
 

@@ -34,6 +34,9 @@
 #include <functional>
 #include <list>
 
+// Wt++ header files
+#include <Wt/WApplication.h>
+
 // Miscellaneous library header files
 #include <boost/locale.hpp>
 #include <GCL>
@@ -251,7 +254,7 @@ private:
 /// @throws
 /// @version    2024-03-15/GGB - Function created.
 
-CRequirementsWidget::CRequirementsWidget()
+CRequirementsWidget::CRequirementsWidget(Wt::WApplication &a) : application(a)
 {
   model = std::make_shared<CRequirementsModel>();
   createUI();
@@ -286,7 +289,23 @@ void CRequirementsWidget::createUI()
 
 void CRequirementsWidget::changeStatus(ID_t ID, bool enable)
 {
-  std::dynamic_pointer_cast<CRequirementsModel>(model)->changeStatus(ID, enable);
+  if (Wt::WApplication::instance() == nullptr)
+  {
+    // Not in GUI thread.
+    Wt::WApplication::UpdateLock uiLock(&application);
+
+    if (uiLock)
+    {
+      std::dynamic_pointer_cast<CRequirementsModel>(model)->changeStatus(ID, enable);
+    };
+    application.triggerUpdate();
+  }
+  else
+  {
+    // IN GUI thread.
+    std::dynamic_pointer_cast<CRequirementsModel>(model)->changeStatus(ID, enable);
+  };
+
 }
 
 

@@ -79,7 +79,7 @@ public:
     Wt::WFileDropWidget::File *file;
     CFileUploadWidget::status_e status;
     std::string fileType;
-    Wt::WText * textEditStatus = nullptr;
+    Wt::WText *textEditStatus = nullptr;
     Wt::WProgressBar *progressBar = nullptr;
     double lastUpdate = 0;
     std::atomic_flag recordUpdated;
@@ -118,7 +118,7 @@ public:
   /*! @brief      Constructor
    *  @throws
    */
-  CFileUploadWidget();
+  CFileUploadWidget(Wt::WApplication &a);
   virtual ~CFileUploadWidget() = default;
 
   void erase(std::filesystem::path const &);
@@ -162,11 +162,13 @@ protected:
  void filesDropped(std::vector<Wt::WFileDropWidget::File *> const& files);
 
 private:
+ CFileUploadWidget() = delete;
   CFileUploadWidget(CFileUploadWidget const &) = delete;
   CFileUploadWidget(CFileUploadWidget &&) = delete;
   CFileUploadWidget &operator=(CFileUploadWidget const &) = delete;
   CFileUploadWidget &operator=(CFileUploadWidget &&) = delete;
 
+  Wt::WApplication &application;
   fileData_t fileData;
   std::uint16_t maxFiles_ = 50;
 };
