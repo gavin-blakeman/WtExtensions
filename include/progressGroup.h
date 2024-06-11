@@ -46,6 +46,7 @@
 
 // Wt Library
 #include <Wt/WContainerWidget.h>
+#include <Wt/WAbstractItemModel.h>
 
 // Miscellaneous library header files
 #include <SCL>
@@ -85,11 +86,16 @@ class CProgressGroupModel;
 class CProgressGroup : public Wt::WContainerWidget
 {
   public:
-    using ID_t = std::uint_least8_t;
+    enum updateEvent_e { U_BEGIN, U_COMPLETE, U_ADD, U_PROGRESS, };
+    using actionID_t = std::uint32_t;
+
+    using ID_t = std::uint64_t;
     using mutex_type = std::shared_mutex;
     using unique_lock = std::unique_lock<mutex_type>;
     using shared_lock = std::shared_lock<mutex_type>;
-    //Susing event_variant = std::variant<std::monostate, eventMatched_t, eventProgress_t>;
+    using uAdd_t = std::tuple<actionID_t, actionID_t, std::string>;
+    using uProgress_t = double_t;
+    using updateVariant_t = std::variant<std::monostate, uAdd_t, uProgress_t>;
     enum status_e
     {
       S_NONE,         //
@@ -98,17 +104,29 @@ class CProgressGroup : public Wt::WContainerWidget
                       // displayed.
       S_COMPLETE,     // The action is complete. The finalText is displayed.
     };
+    struct actionItem_t;
+    using value_ref = std::reference_wrapper<actionItem_t>;
+
     struct actionItem_t
     {
-      ID_t const ID;                                // Application assigned ID. Does not need mutex protection
-      ID_t const PID;                               // Application provided PID. Does not need mutex protection.
-      std::string itemText;                         // Application provided item text. Does not need mutex protection.
-      std::atomic<status_e> status;                 // Current status of the item - Needs mutex protection
+      // Basic data.
+      ID_t const ID;                                // Application assigned ID.
+      ID_t const PID;                               // Application provided PID.
+      ID_t sortOrder;                               // Used for ordering the list of children.
+      std::string const itemText;                   // Application provided item text.
+      mutex_type mActionItem;
+
+      // Model created Data.
+
+      SCL::vector_sorted<value_ref> children;       // Ordered list of children.
+
+      std::atomic<status_e> status = S_PENDING;     // Current status of the item
       Wt::WText *textEditStatus = nullptr;          // Active when status == Pending or complete.
       Wt::WProgressBar *progressBar = nullptr;      // Active when status == Active.
       std::atomic<double> progress{0};              // Progress measurement.
       std::atomic_flag updateRequired;
       std::atomic_flag recalcRequired;
+      Wt::WModelIndex index;
 
       template<int N> ID_t get() const noexcept
       {
@@ -120,11 +138,18 @@ class CProgressGroup : public Wt::WContainerWidget
         {
           return PID;
         }
+        else if constexpr (N == 2)
+        {
+          return sortOrder;
+        }
         else
         {
           CODE_ERROR();
         }
       }
+
+      friend bool operator<(actionItem_t const &LHS, actionItem_t const &RHS) noexcept { return LHS.sortOrder < RHS.sortOrder; }
+      friend bool operator<(value_ref const &LHS, value_ref const &RHS) noexcept { return LHS.get().sortOrder < RHS.get().sortOrder; }
     };
     using value_type = actionItem_t;
     using reference = value_type &;
@@ -132,9 +157,9 @@ class CProgressGroup : public Wt::WContainerWidget
     using pointer = value_type *;
     using const_pointer = value_type const *;
     using value_list = std::forward_list<value_type>;
-    using value_ref = std::reference_wrapper<value_type>;
     struct data_t
     {
+      mutex_type mModel;
       mutex_type mData;                                 // To read or update any of the fields in data this mutex must be held.
       value_list actions;
       std::map<ID_t, value_ref> byID;
@@ -146,10 +171,11 @@ class CProgressGroup : public Wt::WContainerWidget
     };
 
     /*! @brief      Class constructor.
+     *  @param[in]  application: The application that owns this instance.
      *  @param[in]  ps: The string to display for pending items.
      *  @param[in]  cs: The string to display for complete items.
      */
-    CProgressGroup(std::string const &ps, std::string const &cs);
+    CProgressGroup(Wt::WApplication &application, std::string const &ps, std::string const &cs);
     ~CProgressGroup() = default;
 
     /*! @brief      Begins a action step. Change the text to a progress bar.
@@ -164,14 +190,36 @@ class CProgressGroup : public Wt::WContainerWidget
      */
     void completeStep(ID_t actionID);
 
+    /*! @brief      Insert a range of actions.
+     *  @param[in]  begin: The beginning of the range.
+     *  @param[in]  end: The end of the range.
+     *  @throws
+     */
+    template<typename Iter>
+    void insertActions(Iter begin, Iter end)
+    {
+      for (; begin != end; begin++)
+      {
+        std::apply(std::bind_front(&CProgressGroup::insertAction, this), *begin);
+      }
+    }
+
     /*! @brief      Inserts an action.
      *  @parm[in]   actionID: The ID of the new action.
      *  @param[in]  parentID: The parentID of the new action. (0 = top level, multiple allowed)
+     *  @param[in]  sortOrder: The sorting order of the item.
      *  @param[in]  actionText: The text to associate with the action.
      *  @throws     SIGNAL(1) if the action already exists.
      *  @throws     SIGNAL(2) if the PID does not exist. (PID 0 is always allowed.)
      */
-    void insertAction(ID_t actionID, ID_t parentID, std::string const &actionText);
+    void insertAction(ID_t actionID, ID_t parentID, ID_t sortOrder, std::string const &actionText);
+
+    /*! @brief      Callback function that can be caleld to update the progress group,
+     *  @param[in]  actionID: The action to update.
+     *  @param[in]  updateEvent: The update event.
+     *  @param[in]  updateData: The update data.
+     */
+    void updateProgress(ID_t, updateEvent_e updateEvent, updateVariant_t const *updateData = nullptr);
 
     /*! @brief      Updates an action step.
      *  @param[in]  actionID: The action to begin.
@@ -187,8 +235,6 @@ class CProgressGroup : public Wt::WContainerWidget
      *  @throws
      */
     void updateStep(ID_t actionID, double per);
-
-
 
   protected:
     std::shared_ptr<CProgressGroupModel> model;
@@ -208,8 +254,10 @@ class CProgressGroup : public Wt::WContainerWidget
     CProgressGroup &operator=(CProgressGroup const &) = delete;
     CProgressGroup &operator=(CProgressGroup &&) = delete;
 
+    Wt::WApplication &application;
     std::atomic_flag terminateThread;
     std::atomic_flag updatesReceived;
+    std::binary_semaphore sUpdateRequired{0};
     std::uint16_t updatePeriod = 1;
 
     /*! @brief      The thread that is used to update the GUI periodically.

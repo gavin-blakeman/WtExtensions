@@ -75,12 +75,20 @@ public:
   CFileListModel(fileData_t &fd) : fileData(fd) {}
   virtual ~CFileListModel() = default;
 
+  /*! @brief      Called when all the data has been deleted.
+   *  @throws     nothrow
+   */
+ void clearData() noexcept
+ {
+   reset();
+ }
+
   /*! @brief      Insert a new file into the model.
    *  @param[in]  file: pointer to the file.
    *  *throws
    */
 
-  void insert_back(Wt::WFileDropWidget::File *file)
+  ID_t insert_back(Wt::WFileDropWidget::File *file)
   {
     /* Called from within the GUI thread. */
 
@@ -92,6 +100,7 @@ public:
     fileData.byRow.emplace_back(std::ref(fileData.records.back()));
     Wt::WModelIndex modelIndex;
     rowsInserted().emit(modelIndex, fileData.byRow.size() - 1, fileData.byRow.size() - 1);
+    return ID;
   }
 
   /*! @brief      Insert a range of files into the model.
@@ -118,7 +127,6 @@ public:
   {
     /* Can be called from outside the GUI thread. */
 
-    std::cout << "FileID: " << fileID << std::endl;
     shared_lock sl{fileData.mData};
     if (fileData.byID.contains(fileID))
     {
@@ -224,8 +232,6 @@ protected:
   virtual int rowCount(const Wt::WModelIndex &) const override { return fileData.records.size(); }
   virtual Wt::WModelIndex index(int row, int column, const Wt::WModelIndex &parent = Wt::WModelIndex()) const override
   {
-    RUNTIME_ASSERT(column < 3, "CRequirementsWidget::index: Column number out of range.");
-    RUNTIME_ASSERT(row < fileData.records.size(), "CRequirementsWidget::index: Row number out of range.");
     return createIndex(row, column, nullptr);
   }
 
@@ -307,7 +313,6 @@ protected:
   }
 
   virtual Wt::WFlags<Wt::ItemFlag> flags(const Wt::WModelIndex &index) const override { return Wt::WFlags<Wt::ItemFlag>(); }
-  //virtual bool setData(Wt::WModelIndex const &index, std::any const &value, Wt::ItemDataRole role) override;
 
   void dataReceived(std::uint64_t num, std::uint64_t denom)
   {
@@ -325,7 +330,6 @@ protected:
           fileData.byPointer.at(fileData.currentFile).get().progressBar->setValue(temp);
           fileData.byPointer.at(fileData.currentFile).get().lastUpdate = temp;
         }
-
       }
     }
     else
@@ -441,6 +445,20 @@ CFileUploadWidget::CFileUploadWidget(Wt::WApplication &a) : Wt::WFileDropWidget(
   createUI();
 }
 
+  void CFileUploadWidget::clearData() noexcept
+  {
+    unique_lock ul{fileData.mData};
+
+    fileData.files.clear();
+    fileData.records.clear();
+    fileData.byID.clear();
+    fileData.byPointer.clear();
+    fileData.byRow.clear();
+    fileData.currentFile = nullptr;
+    fileData.lastID = 0;
+    model->clearData();
+  }
+
 void CFileUploadWidget::createUI()
 {
   setLayoutSizeAware(true);
@@ -469,23 +487,26 @@ void CFileUploadWidget::fileUploadStarting(Wt::WFileDropWidget::File *file)
 
 void CFileUploadWidget::filesDropped(std::vector<Wt::WFileDropWidget::File*> const& files)
 {
-  model->insert_back(files.begin(), files.end());
+  for (auto const &file: files)
+  {
+    ID_t ID = model->insert_back(file);
+    fileUploadSignal.emit(ID, file);
+  }
 
   // If the maximum number of files has been met or exceeded, don't allow any more drops.
   if (uploads().size() >= maxFiles_)
   {
     setAcceptDrops(false);
   }
+
 }
 
 void CFileUploadWidget::setCompletedText(ID_t fileID, std::string const &ct)
 {
-  std::cout << "FileID: " << fileID << std::endl;
   Wt::WApplication::UpdateLock uiLock(&application);
 
   if (uiLock)
   {
-    std::cout << "FileID: " << fileID << std::endl;
     model->setCompletedText(fileID, ct);
   };
   application.triggerUpdate();

@@ -73,7 +73,8 @@
 /* The CProgressGroupModel handles providing the parent/child hierarchy to the treeView. The model takes the list provided and
  * prepares the preOrder vector.
  *
- * The model needs to be stored to support the retrieval required by the tree view.
+ * As this is a multi-level tree, the model is more complex than a flat tree. Each time an item is added to the tree, the model
+ * needs to be re-organised.
  */
 
 class CProgressGroupModel final : public Wt::WAbstractItemModel
@@ -96,27 +97,6 @@ public:
    */
   CProgressGroupModel(data_type &d) : data_(d)
   {
-//    std::list<ID_t> idList = parentChild.preOrder_ID<std::list<ID_t>>(0);
-//    for (auto const &id: idList)
-//    {
-//      modelData[id] = std::make_tuple(parentChild.parent(id), 0, std::move(parentChild.children(id)));
-//    }
-//
-//    // Set the row numbers. Just work through all the items and assign row numbers as required.
-//    // Note: it may be quicker to use a stack to track row numbers, but this is just as easy and speed is probably not a
-//    // requirement at this time.
-//
-//    for (auto &item: modelData)
-//    {
-//      if (std::get<2>(item.second).size() != 0)
-//      {
-//        std::size_t row = 0;
-//        for (auto const &child: std::get<2>(item.second))
-//        {
-//          std::get<1>(modelData[child]) = row++;
-//        }
-//      }
-//    }
   }
 
   /*! @brief    Class destructor.
@@ -171,8 +151,18 @@ protected:
 
   virtual int rowCount(const Wt::WModelIndex &indx) const override
   {
-    std::uint64_t ID;
+    /*    +---------------------+-----------+--------+------------+---------+-----------------+
+     *    | Thread Group        | Call      | mData  | mActonItem | mModel  | sUpdateRequired |
+     *    |---------------------|-----------+--------+------------+---------+-----------------+
+     *    | 1. Outside Threads  |  NO       |        |            |         |                 |
+     *    | 2. Update Thread    |  NO       |        |            |         |                 |
+     *    | 3. GUI Thread       |  YES      | SHARED |   SHARED   |         |                 |
+     *    +---------------------+-----------+--------+------------+---------+-----------------+
+     */
 
+    int rv;
+
+    std::uint64_t ID;
     if (!indx.isValid())
     {
       ID = 0;
@@ -185,10 +175,22 @@ protected:
       }
       else
       {
-        //ID = std::get<2>(data_.at(indx.internalId())).at(indx.row());
+        shared_lock sl{data_.mData};
+        CProgressGroup::actionItem_t &actionItem = data_.byID.at(indx.internalId());
+        sl.unlock();
+        shared_lock slAI1{actionItem.mActionItem};
+        ID = actionItem.children.at(indx.row()).get().ID;
+        slAI1.unlock();
+        sl.lock();
+        CProgressGroup::actionItem_t &actionItem2 = data_.byID.at(ID);
+        sl.unlock();
+        shared_lock slAI2{actionItem2.mActionItem};
+        rv = actionItem2.children.size();
       }
     }
-    //return std::get<2>(data_.at(ID)).size();
+
+
+    return rv;
   }
 
   /// @brief      Creates an index for the specified item.
@@ -200,11 +202,24 @@ protected:
 
   virtual Wt::WModelIndex index(int row, int col, const Wt::WModelIndex &parent = Wt::WModelIndex()) const override
   {
+    /*    +---------------------+-----------+--------+--------------+---------+-----------------+
+     *    | Thread Group        | Call      | mData  | mActionItem  | mModel  | sUpdateRequired |
+     *    |---------------------|-----------+--------+--------------+---------+-----------------+
+     *    | 1. Outside Threads  |  NO       |        |              |         |                 |
+     *    | 2. Update Thread    |  NO       |        |              |         |                 |
+     *    | 3. GUI Thread       |  YES      | SHARED |   SHARED     |         |                 |
+     *    +---------------------+-----------+--------+--------------+---------+-----------------+
+     */
+
     int PID = 0;
 
     if (parent.isValid())
     {
-      //PID = std::get<2>(modelData.at(parent.internalId())).at(parent.row());
+      shared_lock sl{data_.mData};
+      CProgressGroup::actionItem_t &actionItem = data_.byID.at(parent.internalId()).get();
+      sl.unlock();
+      shared_lock slAI{actionItem.mActionItem};
+      PID = actionItem.children.at(parent.row()).get().ID;
     }
 
     return createIndex(row, col, PID);
@@ -218,14 +233,27 @@ protected:
 
   virtual Wt::WModelIndex parent(const Wt::WModelIndex &indx) const override
   {
+    /*    +---------------------+-----------+--------+--------------+---------+-----------------+
+     *    | Thread Group        | Call      | mData  | mActionItem  | mModel  | sUpdateRequired |
+     *    |---------------------|-----------+--------+--------------+---------+-----------------+
+     *    | 1. Outside Threads  |  NO       |        |              |         |                 |
+     *    | 2. Update Thread    |  NO       |        |              |         |                 |
+     *    | 3. GUI Thread       |  YES      | SHARED |   SHARED     |         |                 |
+     *    +---------------------+-----------+--------+--------------+---------+-----------------+
+     */
+
     if (!indx.isValid() || indx.internalId() == 0)
     {
       return Wt::WModelIndex();   // Root of the tree.
     }
     else
     {
-//      child_type const &item = data_.byID.at(indx.internalId());
-//      return createIndex(std::get<1>(item), 0, std::get<0>(item));
+      shared_lock sl{data_.mData};
+      CProgressGroup::actionItem_t &actionItem = data_.byID.at(indx.internalId()).get();
+      sl.unlock();
+
+      shared_lock slAI{actionItem.mActionItem};
+      return createIndex(actionItem.PID, 0, actionItem.ID);
     }
   }
 
@@ -243,10 +271,24 @@ protected:
 
   virtual std::any data(const Wt::WModelIndex &index, Wt::ItemDataRole role) const override
   {
+    /*    +---------------------+-----------+--------+--------------+---------+-----------------+
+     *    | Thread Group        | Call      | mData  | mActionItem  | mModel  | sUpdateRequired |
+     *    |---------------------|-----------+--------+--------------+---------+-----------------+
+     *    | 1. Outside Threads  |  NO       |        |              |         |                 |
+     *    | 2. Update Thread    |  NO       |        |              |         |                 |
+     *    | 3. GUI Thread       |  YES      | SHARED |   SHARED     |         |                 |
+     *    +---------------------+-----------+--------+--------------+---------+-----------------+
+     */
+
+    shared_lock sl{data_.mData};
+    CProgressGroup::actionItem_t &actionItem = data_.byID.at(index.internalId()).get();
+    sl.unlock();
+    shared_lock slAI{actionItem.mActionItem};
+    CProgressGroup::actionItem_t &actionItem2 = actionItem.children.at(index.row()).get();
+    slAI.unlock();
+    shared_lock slAI2{actionItem2.mActionItem};
+
     std::any rv;
-
-    //ID_t valueID = std::get<2>(modelData.at(index.internalId()))[index.row()];
-
     switch (index.column())
     {
       case 0: // Display the item text.
@@ -255,7 +297,7 @@ protected:
         {
           case Wt::ItemDataRole::Display:
           {
-            //rv = data_.byID.at(valueID).get().itemText;
+            rv = actionItem2.itemText;
           }
           default:
           {
@@ -265,46 +307,45 @@ protected:
         }
         break;
       }
-//      case 1:
-//      {
-//        switch (role.value())
-//        {
-//          case Wt::ItemDataRole::Display:
-//          {
-//            switch (valueRef.status)
-//            {
-//              case S_PENDING:
-//              {
-//                rv = parent.initialText;
-//                break;
-//              }
-//              case S_COMPLETE:
-//              {
-//                rv = parent.finalText;
-//                break;
-//              }
-//              default:
-//              {
-//                CODE_ERROR();
-//                // Does not return.
-//              }
-//            }
-//            break;
-//          }
-//          default:
-//          {
-//            break;
-//          };
-//        }
-//        break;
-//      };
+      case 1:
+      {
+        switch (role.value())
+        {
+          case Wt::ItemDataRole::Display:
+          {
+            switch (actionItem2.status)
+            {
+              case CProgressGroup::S_PENDING:
+              {
+                //rv = parent.initialText;
+                break;
+              }
+              case CProgressGroup::S_COMPLETE:
+              {
+                //rv = parent.finalText;
+                break;
+              }
+              default:
+              {
+                CODE_ERROR();
+                // Does not return.
+              }
+            }
+            break;
+          }
+          default:
+          {
+            break;
+          };
+        }
+        break;
+      };
       default:
       {
         CODE_ERROR();
         // Does not return.
       }
     }
-
     return rv;
   }
 
@@ -317,7 +358,6 @@ private:
   CProgressGroupModel &operator=(CProgressGroupModel const &) = delete;
   CProgressGroupModel &operator=(CProgressGroupModel &&) = delete;
 
-  using child_type = std::tuple<ID_t, int, std::vector<ID_t>>;  // parentID, row, children
   data_type &data_;                                          // Refers to the list maintained by the progress group.
 };
 
@@ -414,7 +454,7 @@ private:
   CProgressItemDelegate &operator=(CProgressItemDelegate &&) = delete;
 };
 
-CProgressGroup::CProgressGroup(std::string const &pt, std::string const &ct)
+CProgressGroup::CProgressGroup(Wt::WApplication &a, std::string const &pt, std::string const &ct) : application(a)
 {
   data.pendingText = pt;
   data.completeText = ct;
@@ -425,8 +465,33 @@ CProgressGroup::CProgressGroup(std::string const &pt, std::string const &ct)
 
 void CProgressGroup::beginStep(ID_t actionID)
 {
+  /*    +---------------------+-----------+--------+------------+---------+-----------------+
+   *    | Thread Group        | Call      | mData  | mActonItem | mModel  | sUpdateRequired |
+   *    |---------------------|-----------+--------+------------+---------+-----------------+
+   *    | 1. Outside Threads  |  YES      | SHARED | UNIQUE     | UNIQUE  |                 |
+   *    | 2. Update Thread    |  NO       |        |            |         |                 |
+   *    | 3. GUI Thread       | POSSIBLE  | SHARED |            | UNIQUE  |                 |
+   *    +---------------------+-----------+--------+------------+---------+-----------------+
+   */
+
   unique_lock ul{data.mData};
-  data.byID.at(actionID).get().status.store(S_ACTIVE);
+
+  if (data.byID.contains(actionID))
+  {
+    actionItem_t &actionItem = data.byID.at(actionID).get();
+    ul.unlock();
+    unique_lock ulAI{actionItem.mActionItem};
+    actionItem.status.store(S_ACTIVE);
+    ulAI.unlock();
+    unique_lock ulM{data.mModel};
+    //model->updateAction(actionID);
+  }
+  else
+  {
+    CODE_ERROR();
+    // Does not return.
+  }
+
 }
 
 void CProgressGroup::createWidget()
@@ -440,36 +505,120 @@ void CProgressGroup::createWidget()
 
 void CProgressGroup::completeStep(ID_t actionID)
 {
+  /*    +---------------------+-----------+--------+------------+---------+-----------------+
+   *    | Thread Group        | Call      | mData  | mActonItem | mModel  | sUpdateRequired |
+   *    |---------------------|-----------+--------+------------+---------+-----------------+
+   *    | 1. Outside Threads  |  YES      | SHARED | UNIQUE     | UNIQUE  |                 |
+   *    | 2. Update Thread    |  NO       |        |            |         |                 |
+   *    | 3. GUI Thread       | POSSIBLE  | SHARED |            | UNIQUE  |                 |
+   *    +---------------------+-----------+--------+------------+---------+-----------------+
+   */
+
   unique_lock ul{data.mData};
-  data.byID.at(actionID).get().status.store(S_COMPLETE);
+
+  if (data.byID.contains(actionID))
+  {
+    actionItem_t &actionItem = data.byID.at(actionID).get();
+    ul.unlock();
+    unique_lock ulAI{actionItem.mActionItem};
+    actionItem.status.store(S_COMPLETE);
+    ulAI.unlock();
+    unique_lock ulM{data.mModel};
+    //model->updateAction(actionID);
+  }
+  else
+  {
+    CODE_ERROR();
+    // Does not return
+  }
 }
 
-void CProgressGroup::insertAction(ID_t actionID, ID_t parentID, std::string const &actionText)
+void CProgressGroup::insertAction(ID_t actionID, ID_t parentID, ID_t sortOrder, std::string const &actionText)
 {
-  unique_lock ul{data.mData};
-  data.actions.emplace_front(actionID, parentID, actionText);
+  /*    +---------------------+-----------+--------+------------+---------+-----------------+
+   *    | Thread Group        | Call      | mData  | mActonItem | mModel  | sUpdateRequired |
+   *    |---------------------|-----------+--------+------------+---------+-----------------+
+   *    | 1. Outside Threads  |  YES      | UNIQUE | UNIQUE     | UNIQUE  |                 |
+   *    | 2. Update Thread    |  NO       |        |            |         |                 |
+   *    | 3. GUI Thread       | POSSIBLE  | UNIQUE |            | UNIQUE  |                 |
+   *    +---------------------+-----------+--------+------------+---------+-----------------+
+   */
 
-  data.byID.emplace(actionID, std::ref(data.actions.front()));
+  unique_lock ul{data.mData};
+  actionItem_t &actionItem = data.actions.emplace_front(actionID, parentID, sortOrder, actionText);
+  data.byID.emplace(actionID, std::ref(actionItem));
+  actionItem_t &parentItem = data.byID.at(actionItem.PID).get();
+  data.parentChild.clear();  // Invalidate the tree.
   ul.unlock();
-  data.recordsUpdated.clear();
+
+  unique_lock ulPI{parentItem.mActionItem};
+  //parentItem.children.emplace(std::ref(actionItem));
+  ulPI.unlock();
+
+  data.recordsUpdated.test_and_set();
+}
+
+void CProgressGroup::updateProgress(ID_t actionID, updateEvent_e updateEvent, updateVariant_t const *updateData)
+{
+  switch(updateEvent)
+  {
+    case U_BEGIN:
+    {
+      beginStep(actionID);
+      break;
+    }
+    case U_PROGRESS:
+    {
+      uProgress_t progress = std::get<uProgress_t>(*updateData);
+      updateStep(actionID, progress);
+      break;
+    }
+    case U_COMPLETE:
+    {
+      completeStep(actionID);
+      break;
+    }
+    case U_ADD:
+    {
+      uAdd_t data = std::get<uAdd_t>(*updateData);
+      //std::apply(std::bind_front(&CProgressGroup::insertAction, this, data));
+      break;
+    }
+    default:
+    {
+      CODE_ERROR();
+      // Does not return.
+    }
+  }
 }
 
   void CProgressGroup::updateStep(ID_t ID, double p)
   {
-//    if (currentItem->progressBar != nullptr)
-//    {
-//      // Get the session lock.
-//      Wt::WApplication::UpdateLock uiLock(&application);
-//
-//      if (uiLock)
-//      {
-//        //currentItem->progressBar->setValue(p);
-//      }
-//    }
-//    else
-//    {
-//      ERRORMESSAGE("CProgressGroup: Commands out of order.");
-//    }
+    /*    +---------------------+-----------+--------+------------+-----------------+
+     *    | Thread Group        | Call      | mData  | mActonItem | sUpdateRequired |
+     *    |---------------------|-----------+--------+------------+-----------------+
+     *    | 1. Outside Threads  |  YES      | SHARED | UNIQUE     |  RELEASE        |
+     *    | 2. Update Thread    |  NO       |        |            |                 |
+     *    | 3. GUI Thread       | POSSIBLE  | SHARED |            |  RELEASE        |
+     *    +---------------------+-----------+--------+------------+-----------------+
+     */
+
+     shared_lock sl{data.mData};
+
+     if (data.byID.contains(ID))
+     {
+       actionItem_t &actionItem = data.byID.at(ID).get();
+       sl.unlock();
+       unique_lock ulAI{actionItem.mActionItem};
+       actionItem.progress = p;
+       sUpdateRequired.release();
+     }
+     else
+     {
+       sl.unlock();
+       CODE_ERROR();
+       // Does not return.
+     }
   }
 
   void CProgressGroup::updateStep(ID_t ID, std::uint64_t n, std::uint64_t d)
@@ -483,52 +632,58 @@ void CProgressGroup::insertAction(ID_t actionID, ID_t parentID, std::string cons
      * recalculated.
      * This is likely going to be an expensive operation as the actions need to be locked for most of the process.
      * Updating the tree can either be brute-forced. IE recalculate from bottom to top. This ensures each node is visited once and
-     * the tree updates correctly. (N)
+     * the tree updates correctly. O(N)
      * There are some potential alternative approaches available as nodes that have been updated are flagged.
      * > Iterate the tree from bottom to top, only updating where required. (node->parent->parent). This is not ideal as the
-     *   worst case timing in (N!).
+     *   worst case timing is O(N!).
      * > Another approach is to pre-process the tree. IE visit each node and create a subset of nodes tha need update. IE capture
      *   the child->parent->parent nodes. A node cannot be added to the tree twice.
      *   The subset can then be preOrdered and processed. This avoids calculating unnecessary nodes, but the pre-processing could
-     *   be expensice. preProcessing (N) postProcessing (<N) worst case (2N), best case (N)
+     *   be expensive. preProcessing O(N) postProcessing O(<N), worst case O(2N), best case O(N).
      * Based on this, probably the best approach is just to recalculate all.
      * However, give each node a flag. preOrder iteratate. If the child has changed then force the parent to update. Updating a
      * parent will fetch the updates from each child. So flag the children as update complete and then flag the parent as update
      * required. This will allow quicker tree propogation and leave the tree with all flags reset at the end. Using an atomic_flag
      * reduces the need to lock the records.
-     *
-     * Note: The tree is also recalculated after additions, but that is to determine the tree structure.
      */
+
+  /*    +---------------------+-----------+--------+------------+---------+-----------------+
+   *    | Thread Group        | Call      | mData  | mActonItem | mModel  | sUpdateRequired |
+   *    |---------------------|-----------+--------+------------+---------+-----------------+
+   *    | 1. Outside Threads  |   NO      |        |            |         |                 |
+   *    | 2. Update Thread    |  YES      |        |            |         |     aquire()    |
+   *    | 3. GUI Thread       |   NO      |        |            |         |                 |
+   *    +---------------------+-----------+--------+------------+---------+-----------------+
+   */
 
     while (terminateThread.test_and_set())
     {
       std::this_thread::sleep_for(std::chrono::seconds(updatePeriod));
-      if (!updatesReceived.test_and_set())
-      {
-        shared_lock slData{data.mData}; // Need a shared lock on the data. (Prevent any updates of the tree.)
-        for (auto &node: data.preOrderTree)
-        {
-          if (!node.get().recalcRequired.test_and_set())
-          {
-            node.get().updateRequired.clear();
-            ID_t nodeID = data.byID.at(node.get().ID).get().PID;
+      sUpdateRequired.acquire();
 
-            // Recalculate the parent.
-            std::vector<ID_t> children = data.parentChild.children(nodeID);
-            double progress = 0.0;
-            for (auto const &child: children)
+      shared_lock slData{data.mData};
+      for (auto &node: data.preOrderTree)
+      {
+        if (node.get().recalcRequired.test_and_set())
+        {
+          node.get().updateRequired.clear();
+          ID_t nodeID = data.byID.at(node.get().ID).get().PID;
+
+          // Recalculate the parent.
+          std::vector<ID_t> children = data.parentChild.children(nodeID);
+          double progress = 0.0;
+          for (auto const &child: children)
+          {
+            progress += data.byID.at(child).get().progress;
+            if (!data.byID.at(child).get().recalcRequired.test_and_set())      // Children won't force a recalc.
             {
-              progress += data.byID.at(child).get().progress;
-              if (!data.byID.at(child).get().recalcRequired.test_and_set())      // Children won't force a recalc.
-              {
-                data.byID.at(child).get().updateRequired.clear();
-              }
-            };
-            data.byID.at(nodeID).get().progress.store(progress / children.size());
-            data.byID.at(nodeID).get().recalcRequired.clear();     // Force a recalc of the parent's parent.
-          }
-          Wt::WApplication *application = Wt::WApplication::instance(); // Get this instance.
+              data.byID.at(child).get().updateRequired.clear();
+            }
+          };
+          data.byID.at(nodeID).get().progress.store(progress / children.size());
+          data.byID.at(nodeID).get().recalcRequired.clear();     // Force a recalc of the parent's parent.
         }
+        Wt::WApplication *application = Wt::WApplication::instance(); // Get this instance.
       }
     }
   }

@@ -45,6 +45,7 @@
 
 // Wt++ header files
 #include <Wt/WFileDropWidget.h>
+#include <Wt/WSignal.h>
 
 class CFileListModel;
 
@@ -121,6 +122,11 @@ public:
   CFileUploadWidget(Wt::WApplication &a);
   virtual ~CFileUploadWidget() = default;
 
+  /*! @brief      Clears all the data. All the files should also be deleted.
+   *  @throws     nothrow
+   */
+  void clearData() noexcept;
+
   void erase(std::filesystem::path const &);
 
   /*! @brief      Sets the maximum number of files that can be uploaded by the widget.
@@ -171,6 +177,7 @@ private:
   Wt::WApplication &application;
   fileData_t fileData;
   std::uint16_t maxFiles_ = 50;
+  Wt::Signal<ID_t, Wt::WFileDropWidget::File *> fileUploadSignal;
 };
 
 

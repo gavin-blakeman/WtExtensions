@@ -83,6 +83,15 @@ public:
     reset();
   }
 
+  void resetAll() noexcept
+  {
+    for (auto &record: records_)
+    {
+      record.second.available = false;
+    }
+    reset();
+  }
+
 protected:
   virtual std::any headerData(int section, Wt::Orientation orientation, Wt::ItemDataRole role) const override
   {
@@ -346,4 +355,8 @@ void CRequirementsWidget::insert(std::initializer_list<std::tuple<ID_t, std::str
   }
 }
 
+void CRequirementsWidget::resetAll() noexcept
+{
+  std::dynamic_pointer_cast<CRequirementsModel>(model)->resetAll();
+}
 

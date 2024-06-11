@@ -68,6 +68,10 @@ public:
   void changeStatus(ID_t, bool = true);
 
   [[nodiscard]] bool allMet() const noexcept;
+  
+  /*! @brief      Resets all the requirements to false. IE not met.
+   */
+  void resetAll() noexcept;
 
 protected:
   void createUI();
