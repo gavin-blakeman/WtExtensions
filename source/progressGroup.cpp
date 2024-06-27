@@ -61,12 +61,12 @@
  * > callbackFunction - read value_list and byID
  * > Reload model
  * The action data can be accessed by the following:
- * > updateThread - Read and write data. Writing data could all be assinged to atomics.
+ * > updateThread - Read and write data. Writing data could all be assigned to atomics.
  * > callbackFunction - write data. Could be done using atomics.
  * > delegate - read/write data - Could be done with atomics.
  * > model - read data - atomics ok.
  * The action data does not require a mutex if all the mutable data can be stored in atomics, including the pointer. Noting that
- * atomics may be implemeted using locks.
+ * atomics may be implemented using locks.
  */
 
 
@@ -118,12 +118,12 @@ protected:
           {
             case 0:
             {
-              returnValue = boost::locale::translate("Action");
+              returnValue = static_cast<std::string>(boost::locale::translate("Action"));
               break;
             };
             case 1:
             {
-              returnValue = boost::locale::translate("Status");
+              returnValue = static_cast<std::string>(boost::locale::translate("Status"));
               break;
             };
             default:
