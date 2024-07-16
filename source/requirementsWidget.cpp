@@ -55,7 +55,10 @@ public:
     bool rv = true;
     for (auto const &r: records_)
     {
-      rv = rv && r.second.available;
+      if (r.second.requirementType == CRequirementsWidget::REQUIRED)
+      {
+        rv = rv && r.second.available;
+      }
     }
     return rv;
   }
